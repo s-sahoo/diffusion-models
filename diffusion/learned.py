@@ -1,4 +1,5 @@
 """Implements the core diffusion algorithms."""
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -11,14 +12,15 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
     """Implements the core learning and inference algorithms."""
     def __init__(
         self, noise_model, forward_matrix, timesteps, img_shape,
-        schedule='linear', device='cpu'
+        alpha=5.0, schedule='linear', device='cpu'
     ):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device
         )
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
-        self.alpha = nn.Parameter(torch.tensor(1.))
+        self.alpha = nn.Parameter(
+            torch.tensor(alpha / np.sqrt(timesteps)))
 
     def _forward_sample(self, x0, time):
         return self.forward_matrix(self.model.time_mlp(time))

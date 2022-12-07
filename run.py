@@ -35,7 +35,9 @@ def make_parser():
     train_parser.add_argument('--timesteps', type=int, default=200,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
-        help='total number of timesteps in the diffusion model')
+        help='sample timesteps from a weighted distribution.')
+    train_parser.add_argument('--alpha', type=float, default=5.0,
+        help='noise coefficient in the forward pass.')
     train_parser.add_argument('--dataset', default='fashion-mnist',
         choices=['fashion-mnist', 'mnist'], help='training dataset')
     train_parser.add_argument('--checkpoint', default=None,
@@ -221,6 +223,7 @@ def create_learned(config, device):
         noise_model=model,
         forward_matrix=forward_matrix,
         img_shape=img_shape,
+        alpha=args.alpha,
         timesteps=config.timesteps,
         device=device,
     )
@@ -249,6 +252,7 @@ def create_learned_input_time(config, device):
         forward_matrix=forward_matrix,
         reverse_model=reverse_model,
         img_shape=img_shape,
+        alpha=args.alpha,
         timesteps=config.timesteps,
         device=device,
     )
