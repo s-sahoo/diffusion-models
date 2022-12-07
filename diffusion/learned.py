@@ -19,11 +19,16 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         )
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
-        self.alpha = nn.Parameter(
-            torch.tensor(alpha / np.sqrt(timesteps)))
 
     def _forward_sample(self, x0, time):
         return self.forward_matrix(self.model.time_mlp(time))
+
+    def _get_alpha(self, batch_size):
+        time = torch.tensor([self.timesteps] * batch_size,
+                             device=self.device)
+        m_T = self._forward_sample(
+            self, None, time).view(batch_size, -1)
+        return 1 / (np.sqrt(self.timesteps) * m_T)
 
     def q_sample(self, x0, t, noise=None):
         """Samples from the forward diffusion process q.
@@ -39,9 +44,9 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         x0 = x0.view(batch_size, -1)
         t = t.view(batch_size, -1)
         noise = noise.view(batch_size, -1)
-        
+        alpha = self._get_alpha(batch_size)
         x_t = transormation_matrices * (
-            x0 + self.alpha * torch.sqrt(t) * noise)
+            x0 + alpha * torch.sqrt(t) * noise)
         
         return x_t.view(* original_batch_shape)
 
@@ -55,8 +60,8 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         original_batch_shape = xt.shape
 
         t =  torch.full((batch_size,), t_index, device=self.device, dtype=torch.long)
-        
-        coefficient_mu_z = self.alpha / torch.sqrt(t).view(batch_size, -1)
+        alpha = self._get_alpha(batch_size)
+        coefficient_mu_z = alpha / torch.sqrt(t).view(batch_size, -1)
         m_t = self._forward_sample(None, t).view(batch_size, -1)
         m_t_minus_1 = self._forward_sample(None, t - 1).view(batch_size, -1)
         if t_index == 1:
@@ -67,7 +72,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         x_t_minus_1 = model_mean
 
         if not deterministic:
-            variance_scale = self.alpha * torch.sqrt(
+            variance_scale = alpha * torch.sqrt(
                 (t - 1) / t).view(batch_size, -1)
             noise = torch.randn_like(model_mean)
             x_t_minus_1 += variance_scale * noise * m_t_minus_1
@@ -94,12 +99,13 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         m_T = self._forward_sample(
             x0, torch.tensor([self.timesteps] * batch_size,
                              device=self.device)).view(batch_size, -1)
-        constant = (self.alpha ** 2) * self.timesteps
-        trace = constant * (m_T ** 2).sum(dim=1).mean()
+        
+        # constant = (self._get_alpha(batch_size) ** 2) * self.timesteps
+        # trace = (constant * m_T ** 2).sum(dim=1).mean()
         mu_squared = (
             (m_T * x0.view(batch_size, -1)) ** 2).sum(dim=1).mean()
-        log_determinant = torch.log(constant * m_T ** 2).sum(dim=1).mean()
-        return 0.5 * (trace + mu_squared - log_determinant - 784)
+        # log_determinant = torch.log(constant * m_T ** 2).sum(dim=1).mean()
+        return 0.5 * (mu_squared - 784)
 
     def loss_at_step_t(self, x0, t, loss_weights, loss_type='l1', noise=None):
         if noise is not None: raise NotImplementedError()
@@ -115,7 +121,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
 
         return loss_weights * noise_loss + kl_divergence / self.timesteps, {
-            'alpha': self.alpha.detach().cpu().numpy(),
+            'alpha': self._get_alpha(batch_size).detach().cpu().numpy(),
             'noise_loss': noise_loss.item(),
             'kl_divergence': kl_divergence.item(),
         }
