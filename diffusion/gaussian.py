@@ -112,7 +112,8 @@ class GaussianDiffusion(nn.Module):
             raise NotImplementedError()
         return loss
 
-    def loss_at_step_t(self, x0, t, loss_type="l1", noise=None):
+    def loss_at_step_t(self, x0, t, loss_weights, loss_type="l1", noise=None):
+        del loss_weights
         if noise is None:
             noise = torch.randn_like(x0)
 

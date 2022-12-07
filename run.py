@@ -90,7 +90,7 @@ def train(args):
     config.learning_rate = args.learning_rate or config.learning_rate
     config.optimizer = args.optimizer or config.optimizer
     config.timesteps = args.timesteps or config.timesteps
-    
+    print('Time steps: ', config.timesteps)
     model = get_model(config, device)
 
     if args.checkpoint:
