@@ -34,6 +34,11 @@ def make_parser():
         help='type of ddpm model to run')
     train_parser.add_argument('--timesteps', type=int, default=200,
         help='total number of timesteps in the diffusion model')
+    train_parser.add_argument('--alpha', type=float, default=5.0,
+        help='noise coefficient in the forward pass.')
+    train_parser.add_argument('--alpha_type', type=float, default='scalar',
+        choices=['scalar', 'learnable_scalar', 'matrix'], 
+        help='noise coefficient in the forward pass.')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
         help='sample timesteps from a weighted distribution.')
     train_parser.add_argument('--epsilon', type=float, default=0.1,
@@ -220,11 +225,15 @@ def create_learned(config, device):
         epsilon=args.epsilon,
     ).to(device)
 
-    return LearnedGaussianDiffusion(
+    learned_models = {'scalar': AlphaScalar,
+                      'learnable_scalar':AlphaLearnableScalar,
+                      'matrix': AlphaMatrix}
+
+    return learned_models[args.alpha_type](
         noise_model=model,
         forward_matrix=forward_matrix,
         img_shape=img_shape,
-        alpha=None,
+        alpha=args.alpha,
         timesteps=config.timesteps,
         device=device,
     )
