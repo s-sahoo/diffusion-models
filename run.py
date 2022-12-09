@@ -10,7 +10,7 @@ from models.unet.auxiliary import AuxiliaryUNet, TimeEmbeddingAuxiliaryUNet
 from data import get_data_loader
 from diffusion.gaussian import GaussianDiffusion
 from diffusion.auxiliary import InfoMaxDiffusion
-from diffusion.learned import LearnedGaussianDiffusion
+from diffusion.learned import AlphaMatrix, AlphaScalar, AlphaLearnableScalar
 from diffusion.learned_input_and_time import LearnedGaussianDiffusionInputTime
 from models.modules.encoders import ConvGaussianEncoder
 from data.fashion_mnist import FashionMNISTConfig

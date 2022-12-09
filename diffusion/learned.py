@@ -8,7 +8,7 @@ from torchvision.utils import save_image
 from .schedule import get_schedule, get_by_idx
 from .gaussian import GaussianDiffusion
 
-class LearnedGaussianDiffusion(GaussianDiffusion):
+class AlphaMatrix(GaussianDiffusion):
     """Implements the core learning and inference algorithms."""
     def __init__(
         self, noise_model, forward_matrix, timesteps, img_shape,
@@ -123,3 +123,26 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
             'noise_loss': noise_loss.item(),
             'kl_divergence': kl_divergence.item(),
         }
+
+
+class AlphaScalar(AlphaMatrix):
+    def __init__(
+        self, noise_model, forward_matrix, timesteps, img_shape,
+        alpha=5.0, schedule='linear', device='cpu'):
+        super().__init__(
+            noise_model, forward_matrix, timesteps, img_shape,
+            alpha=alpha, schedule=schedule, device=device)
+        self.alpha = alpha
+
+    def _get_alpha(self, batch_size):
+        return self.alpha
+
+
+class AlphaLearnableScalar(AlphaScalar):
+    def __init__(
+        self, noise_model, forward_matrix, timesteps, img_shape,
+        alpha=5.0, schedule='linear', device='cpu'):
+        super().__init__(
+            noise_model, forward_matrix, timesteps, img_shape,
+            alpha=alpha, schedule=schedule, device=device)
+        self.alpha = nn.Parameter(torch.tensor(alpha / np.sqrt(timesteps)))
