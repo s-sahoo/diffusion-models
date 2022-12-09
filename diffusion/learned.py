@@ -26,8 +26,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
     def _get_alpha(self, batch_size):
         time = torch.tensor([self.timesteps] * batch_size,
                              device=self.device)
-        m_T = self._forward_sample(
-            self, None, time).view(batch_size, -1)
+        m_T = self._forward_sample(None, time).view(batch_size, -1)
         return 1 / (np.sqrt(self.timesteps) * m_T)
 
     def q_sample(self, x0, t, noise=None):
@@ -36,7 +35,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         Takes a sample from q(xt|x0). t \in {1, \dots, timesteps}
         """
         # encode x0 into auxiliary encoder variable a
-        if noise is None:  noise, _, _ = torch.randn_like(x0)
+        if noise is None:  noise = torch.randn_like(x0)
         original_batch_shape = x0.shape
         batch_size = original_batch_shape[0]
         transormation_matrices = self._forward_sample(
@@ -100,12 +99,12 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
             x0, torch.tensor([self.timesteps] * batch_size,
                              device=self.device)).view(batch_size, -1)
         
-        # constant = (self._get_alpha(batch_size) ** 2) * self.timesteps
-        # trace = (constant * m_T ** 2).sum(dim=1).mean()
+        constant = (self._get_alpha(batch_size) ** 2) * self.timesteps
+        trace = (constant * m_T ** 2).sum(dim=1).mean()
         mu_squared = (
             (m_T * x0.view(batch_size, -1)) ** 2).sum(dim=1).mean()
-        # log_determinant = torch.log(constant * m_T ** 2).sum(dim=1).mean()
-        return 0.5 * (mu_squared - 784)
+        log_determinant = torch.log(constant * m_T ** 2).sum(dim=1).mean()
+        return 0.5 * (trace + mu_squared - log_determinant - 784)
 
     def loss_at_step_t(self, x0, t, loss_weights, loss_type='l1', noise=None):
         if noise is not None: raise NotImplementedError()
@@ -121,7 +120,6 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
 
         return loss_weights * noise_loss + kl_divergence / self.timesteps, {
-            'alpha': self._get_alpha(batch_size).detach().cpu().numpy(),
             'noise_loss': noise_loss.item(),
             'kl_divergence': kl_divergence.item(),
         }

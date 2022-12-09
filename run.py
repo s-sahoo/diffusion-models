@@ -36,8 +36,8 @@ def make_parser():
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
         help='sample timesteps from a weighted distribution.')
-    train_parser.add_argument('--alpha', type=float, default=5.0,
-        help='noise coefficient in the forward pass.')
+    train_parser.add_argument('--epsilon', type=float, default=0.1,
+        help='lower bound on the entries in the m_t matrix.')
     train_parser.add_argument('--dataset', default='fashion-mnist',
         choices=['fashion-mnist', 'mnist'], help='training dataset')
     train_parser.add_argument('--checkpoint', default=None,
@@ -92,7 +92,7 @@ def train(args):
     config.learning_rate = args.learning_rate or config.learning_rate
     config.optimizer = args.optimizer or config.optimizer
     config.timesteps = args.timesteps or config.timesteps
-    print('Time steps: ', config.timesteps)
+    print('Timesteps: ', config.timesteps)
     model = get_model(config, device)
 
     if args.checkpoint:
@@ -217,13 +217,14 @@ def create_learned(config, device):
         input_size=model.time_channels,
         identity=False,
         positive_outputs=True,
+        epsilon=args.epsilon,
     ).to(device)
 
     return LearnedGaussianDiffusion(
         noise_model=model,
         forward_matrix=forward_matrix,
         img_shape=img_shape,
-        alpha=args.alpha,
+        alpha=None,
         timesteps=config.timesteps,
         device=device,
     )

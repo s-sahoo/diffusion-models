@@ -62,6 +62,9 @@ class Trainer():
 
     def fit(self, data_loader, epochs):
         for epoch in range(epochs):
+            epsilon = 10 ** (-1 - epoch / epochs)
+            self.model.forward_matrix.epsilon = epsilon
+            print('epsilon: ', epsilon)
             metrics_per_epoch = collections.defaultdict(list)
             for step, batch in enumerate(data_loader):
                 self.optimizer.zero_grad()
