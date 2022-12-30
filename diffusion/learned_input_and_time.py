@@ -1,4 +1,5 @@
 """Implements the core diffusion algorithms."""
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -7,6 +8,35 @@ from torchvision.utils import save_image
 from .schedule import get_schedule, get_by_idx
 from .learned import LearnedGaussianDiffusion
 
+
+def gaussian_kernel(l=5, sigma=1.):
+    """Creates gaussian kernel with side length `l` and a sigma of `sig`.
+    Taken from:
+    https://stackoverflow.com/questions/29731726/how-to-calculate-a-gaussian-kernel-matrix-efficiently-in-numpy
+    """
+    x = np.linspace(-(l - 1) / 2., (l - 1) / 2., l)
+    gaussian_1d = np.exp(-0.5 * np.square(x) / np.square(sigma))
+    kernel = np.outer(gaussian_1d, gaussian_1d)
+    return kernel / np.sum(kernel)
+
+
+def conv_to_dense(kernel, size):
+    weights = []
+    kernel_size, _ = kernel.shape
+    assert kernel_size % 2 == 1
+    kernel_half_width = kernel_size // 2
+    base_size = size + 2 * kernel_half_width
+    for i in range(size):
+        for j in range(size):
+            base = np.zeros((base_size, base_size))
+            base[i:i + kernel_size, j:j + kernel_size] = kernel
+            base = base[kernel_half_width: -kernel_half_width,
+                        kernel_half_width: -kernel_half_width]
+            weights.append(base.reshape(-1))
+    weights = np.asarray(weights)
+    # print(weights.shape, base_size)
+    assert weights.shape == (size * size, size * size)
+    return weights
 
 class LearnedGaussianDiffusionInputTime(LearnedGaussianDiffusion):
     """Implements the core learning and inference algorithms."""
@@ -19,6 +49,13 @@ class LearnedGaussianDiffusionInputTime(LearnedGaussianDiffusion):
             schedule, device)
         self.reverse_model = reverse_model
         self.epsilon = 1e-6
+        self.blur_matrix = torch.tensor(
+            conv_to_dense(gaussian_kernel(sigma=5), self.img_dim),
+            device=self.device,
+            dtype=torch.float32)
+        for _ in range(8):
+            self.blur_matrix = torch.matmul(
+                self.blur_matrix, self.blur_matrix)
 
     def _clip_output(self, x):
         return self.epsilon + torch.nn.functional.softplus(x)
@@ -33,6 +70,38 @@ class LearnedGaussianDiffusionInputTime(LearnedGaussianDiffusion):
             self.sqrt_one_minus_bar_alphas, t, x0_noisy.shape)
         return (x0_noisy
                 - sqrt_one_minus_bar_alphas_t * z) / sqrt_bar_alphas_t
+
+    @torch.no_grad()
+    def sample(self, batch_size, x=None, deterministic=False):
+        """Samples from the diffusion process, producing images from noise
+
+        Repeatedly takes samples from p(x_{t-1}|x_t) for each t
+        """
+        shape = (batch_size, self.img_channels, self.img_dim, self.img_dim)
+        if x is None: 
+            noise = torch.randn(
+                shape, device=self.device)
+            t = torch.tensor([self.timesteps - 1] * batch_size,
+                             device=self.device)
+            transormation_matrices = self._forward_sample(
+                noise, t).view(batch_size, -1)
+            x = (transormation_matrices * noise.view(batch_size, -1)).view(* shape)
+        xs = [x.cpu().numpy()]
+
+        for t in reversed(range(self.timesteps)):
+            x = self.p_sample(x, t, deterministic=(t==0 or deterministic))
+            xs.append(x.cpu().numpy())
+        return xs
+
+    def _compute_prior_kl_divergence(self, x0, batch_size):
+        t = torch.tensor([self.timesteps - 1] * batch_size,
+                         device=self.device)
+        m_T = self._forward_sample(x0, t).view(batch_size, -1)
+        blurred_images = torch.matmul(
+            x0.view(batch_size, 1, -1),
+            self.blur_matrix).view(batch_size, -1)
+        return self.p_loss_at_step_t(
+            m_T * x0.view(batch_size, -1), blurred_images)
 
     @torch.no_grad()
     def p_sample_prev_mean(self, m_inverse_xt, m_t_minus_1_bar, z, t, shape):
