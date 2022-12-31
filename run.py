@@ -12,6 +12,7 @@ from data import get_data_loader
 from diffusion.gaussian import GaussianDiffusion
 from diffusion.auxiliary import InfoMaxDiffusion
 from diffusion.learned import LearnedGaussianDiffusion
+from diffusion.learned_blurring import Blurring
 from diffusion.learned_input_and_time import LearnedGaussianDiffusionInputTime
 from diffusion.learned_input_and_time import InputTimeReparam2
 from diffusion.learned_input_and_time import InputTimeReparam3
@@ -36,7 +37,7 @@ def make_parser():
     train_parser.set_defaults(func=train)
 
     train_parser.add_argument('--model', default='gaussian',
-        choices=['gaussian', 'infomax', 'learned', 'learned_input_time'], 
+        choices=['gaussian', 'infomax', 'blur', 'learned', 'learned_input_time'], 
         help='type of ddpm model to run')
     train_parser.add_argument('--schedule', default='cosine',
         choices=['linear', 'cosine'], 
@@ -48,6 +49,8 @@ def make_parser():
         help='reparameterization type for input time diffusion model.')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
+    train_parser.add_argument('--fixed_blur', type=bool, default=False,
+        help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--dataset', default='fashion-mnist',
         choices=['fashion-mnist', 'mnist'], help='training dataset')
     train_parser.add_argument('--checkpoint', default=None,
@@ -56,7 +59,7 @@ def make_parser():
         help='number of epochs to train')
     train_parser.add_argument('--batch-size', type=int, default=None,
         help='training batch size')
-    train_parser.add_argument('--learning-rate', type=float, default=0.0001,
+    train_parser.add_argument('--learning-rate', type=float, default=0.0005,
         help='learning rate')
     train_parser.add_argument('--optimizer', default='adam', choices=['adam'],
         help='optimization algorithm')
@@ -164,6 +167,8 @@ def get_model(config, device):
         model = create_gaussian(config, device)
     elif args.model == 'infomax':
         model = create_infomax(config, device)
+    elif args.model == 'blur':
+        model = create_blur(config, device)
     elif args.model == 'learned':
         model = create_learned(config, device)
     elif args.model == 'learned_input_time':
@@ -238,6 +243,37 @@ def create_learned(config, device):
         timesteps=config.timesteps,
         device=device,
     )
+
+
+def create_blur(config, device):
+    img_shape = [config.img_channels, config.img_dim, config.img_dim]
+    model = UNet(
+        channels=config.unet_channels,
+        chan_mults=config.unet_mults,
+        img_shape=img_shape,
+    ).to(device)
+    reverse_model = UNet(
+        channels=config.unet_channels,
+        chan_mults=config.unet_mults,
+        img_shape=img_shape,
+    ).to(device)
+    forward_matrix = feedforward.Net(
+        input_size=model.time_channels,
+        identity=False,
+        positive_outputs=True,
+    ).to(device)
+
+    return Blurring(
+        noise_model=model,
+        forward_matrix=forward_matrix,
+        reverse_model=reverse_model,
+        fixed_blur=args.fixed_blur,
+        schedule=args.schedule,
+        img_shape=img_shape,
+        timesteps=config.timesteps,
+        device=device,
+    )
+
 
 def create_learned_input_time(config, device, reparam):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
