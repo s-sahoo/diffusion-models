@@ -54,7 +54,7 @@ class Blurring(GaussianDiffusion):
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
         self.base_blur_matrix = torch.tensor(
-            conv_to_dense(gaussian_kernel(sigma=0.35), self.img_dim),
+            conv_to_dense(gaussian_kernel(sigma=0.25), self.img_dim),
             device=self.device,
             dtype=torch.float32)
         self.reverse_model = reverse_model
