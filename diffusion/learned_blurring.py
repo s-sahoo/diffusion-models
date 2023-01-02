@@ -82,7 +82,7 @@ class Blurring(GaussianDiffusion):
     def _forward_eigenvalues(self, x0, time):
         if self.fixed_blur:
             return self.all_blur_eigen_values[time]
-        return self.forward_matrix(self.model.time_mlp(time))
+        return self.forward_matrix(self.reverse_model.time_mlp(time))
 
     def _forward_sample(self, x0, time):
         eigenvalues = self._forward_eigenvalues(x0, time)
