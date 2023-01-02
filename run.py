@@ -248,10 +248,6 @@ def create_learned(config, device):
 
 def create_blur(config, device):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
-    model = colab_UNet(
-        dim=config.img_dim,
-        channels=config.img_channels,
-        dim_mults=(1, 2, 4,)).to(device)
     reverse_model = colab_UNet(
         dim=config.img_dim,
         channels=config.img_channels,
@@ -262,7 +258,7 @@ def create_blur(config, device):
         positive_outputs=True).to(device)
 
     return Blurring(
-        noise_model=model,
+        noise_model=None,
         forward_matrix=forward_matrix,
         reverse_model=reverse_model,
         fixed_blur=args.fixed_blur,

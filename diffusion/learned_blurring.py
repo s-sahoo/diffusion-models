@@ -54,7 +54,7 @@ class Blurring(GaussianDiffusion):
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
         self.base_blur_matrix = torch.tensor(
-            conv_to_dense(gaussian_kernel(sigma=0.25), self.img_dim),
+            conv_to_dense(gaussian_kernel(sigma=0.35), self.img_dim),
             device=self.device,
             dtype=torch.float32)
         self.reverse_model = reverse_model
@@ -119,22 +119,12 @@ class Blurring(GaussianDiffusion):
         original_batch_shape = x0.shape
         batch_size = original_batch_shape[0]
         transformation_matrices = self._forward_sample(x0, t)
-        noisy_images = self._add_noise(
-            x0, t, noise).view(batch_size, self.img_dim ** 2, 1)
-        x_t = torch.bmm(transformation_matrices, noisy_images)
-        return x_t.view(* original_batch_shape)
-
-    @torch.no_grad()
-    def p_sample_prev_mean(self, m_inverse_xt, m_t_minus_1_bar, z, t, shape):
-        sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
-        sqrt_recip_alphas_t = get_by_idx(sqrt_recip_alphas, t, shape)
-        sqrt_one_minus_bar_alphas_t = get_by_idx(
-            self.sqrt_one_minus_bar_alphas, t, shape)
-        betas_t = get_by_idx(self.betas, t, shape)
-        return sqrt_recip_alphas_t * (
-            # m_t_minus_1_bar * xt / m_t_bar
-            m_inverse_xt
-            - betas_t * torch.bmm(m_t_minus_1_bar, z) / sqrt_one_minus_bar_alphas_t)
+        x0 = x0.view(batch_size, self.img_dim ** 2, 1)
+        blurred_images = torch.bmm(
+            transformation_matrices, x0).view(
+                * original_batch_shape)
+        x_t = self._add_noise(blurred_images, t, noise)
+        return x_t
 
     @torch.no_grad()
     def p_sample(self, xt, t_index, deterministic=False):
@@ -146,39 +136,14 @@ class Blurring(GaussianDiffusion):
         original_batch_shape = xt.shape
 
         t =  torch.full((batch_size,), t_index, device=self.device, dtype=torch.long)
-        xt_reversed = self.reverse_model(xt, t).view(batch_size, self.img_dim ** 2, 1)
-        xt = xt.view(batch_size, self.img_dim ** 2, 1)
+        x0_approx = xt + self.reverse_model(xt, t)
 
-        # compute m matrices, shape (batch_size, img_dim ** 2, img_dim ** 2)
-        m_t_bar = self._forward_sample(None, t)
-        m_t_minus_1_bar = self._forward_sample(None, t - 1)
-    
         if t_index == 0:
-            m_t_minus_1_bar = torch.eye(
-                self.img_dim ** 2,
-                device=self.device,
-                dtype=m_t_minus_1_bar.dtype)[None, :, :] + 0 * m_t_minus_1_bar  # identity
-        # Equation 11 in the paper
-        # Use our model (noise predictor) to predict the mean
-        z = self.model(xt.view(* original_batch_shape), t).view(batch_size, self.img_dim ** 2, 1)
-        xt_prev_mean = self.p_sample_prev_mean(
-            m_inverse_xt=(xt - torch.bmm(m_t_bar, xt_reversed)
-                          + torch.bmm(m_t_minus_1_bar, xt_reversed)),
-            m_t_minus_1_bar=m_t_minus_1_bar,
-            t=t,
-            z=z,
-            shape=xt.shape)
-
+            return x0_approx
+        noise = torch.randn_like(x0_approx)
         if deterministic:
-            xt_prev = xt_prev_mean # need this?
-        else:
-            post_var_t = get_by_idx(self.posterior_variance, t, xt_prev_mean.shape)
-            noise = torch.randn_like(xt_prev_mean)
-            # Algorithm 2 line 4:
-            xt_prev = xt_prev_mean + torch.sqrt(post_var_t) * torch.bmm(m_t_minus_1_bar, noise)
-
-        # return x_{t-1}
-        return xt_prev.view(* original_batch_shape)
+            noise = 0 * noise
+        return self.q_sample(x0_approx, t - 1, noise)
 
     def _compute_prior_kl_divergence(self, x0, batch_size):
         t = torch.tensor([self.timesteps - 1] * batch_size,
@@ -200,24 +165,18 @@ class Blurring(GaussianDiffusion):
         else:
             raise NotImplementedError()
         batch_size = x0.shape[0]
-        x_noisy = self.q_sample(x0=x0, t=t, noise=noise)
-        
-        predicted_noise = self.model(x_noisy, t)
-        noise_loss = self.p_loss_at_step_t(noise, predicted_noise, loss_type)
+        x_t = self.q_sample(x0=x0, t=t, noise=noise)
 
         # reverse model loss
         reverse_model_loss = self.p_loss_at_step_t(
-            self._add_noise(x0, t, noise).view(batch_size, -1),
-            # TODO: detach x_noisy
-            self.reverse_model(x_noisy, t).view(batch_size, -1),
+            x0 - x_t,
+            self.reverse_model(x_t, t),
             loss_type)
 
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
         total_loss = (reverse_model_loss
-                      + loss_weights * noise_loss
                       + kl_divergence / self.timesteps)
         return total_loss, {
             'reverse_model_loss': reverse_model_loss.item(),
-            'noise_loss': noise_loss.item(),
             'kl_divergence': kl_divergence.item(),
         }
