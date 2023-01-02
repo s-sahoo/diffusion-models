@@ -17,7 +17,7 @@ def process_images(images, return_type='float'):
     processed_images = []
     for image in images:
         #TODO: This is for fashion mnist.
-        image = 255 * (image + 1) * 0.5
+        image = 255 * np.clip((image + 1) * 0.5, 0, 1)
         if image.shape[0] == 1:
           image = np.array([image[0]] * 3)
         image = np.transpose(image, (1, 2, 0)).astype(np.uint8)
