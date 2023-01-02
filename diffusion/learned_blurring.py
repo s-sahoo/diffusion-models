@@ -72,27 +72,6 @@ class Blurring(GaussianDiffusion):
             device=self.device,
             dtype=torch.float32)
 
-    @torch.no_grad()
-    def sample(self, batch_size, x=None, deterministic=False):
-        """Samples from the diffusion process, producing images from noise
-
-        Repeatedly takes samples from p(x_{t-1}|x_t) for each t
-        """
-        shape = (batch_size, self.img_channels, self.img_dim, self.img_dim)
-        if x is None: 
-            noise = torch.randn(shape, device=self.device)
-            t = torch.tensor([self.timesteps - 1] * batch_size,
-                             device=self.device)
-            transformation_matrices = self._forward_sample(None, t)
-            x = torch.bmm(transformation_matrices,
-                          noise.view(batch_size, self.img_dim ** 2, 1)).view(* shape)
-        xs = [x.cpu().numpy()]
-
-        for t in reversed(range(self.timesteps)):
-            x = self.p_sample(x, t, deterministic=(t==0 or deterministic))
-            xs.append(x.cpu().numpy())
-        return xs
-
     def _construct_blur_matrix(self, eigenvalues):
         batch_size = eigenvalues.shape[0]
         eigenvalues = eigenvalues.view(batch_size, self.img_dim ** 2, 1)
