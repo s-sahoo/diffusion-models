@@ -119,9 +119,9 @@ class Blurring(GaussianDiffusion):
 
         if t_index == 0:
             return x0_approx
-        noise = torch.randn_like(x0_approx)
+        noise = None
         if deterministic:
-            noise = 0 * noise
+            noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
 
     def _compute_prior_kl_divergence(self, x0, batch_size):
