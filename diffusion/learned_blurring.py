@@ -71,7 +71,7 @@ class Blurring(GaussianDiffusion):
             [eigen_values ** i for i in range(1, timesteps + 1)],
             device=self.device,
             dtype=torch.float32)
-        self.blur_levels_t = torch.nn.paramter(
+        self.blur_levels_t = torch.nn.Parameter(
             torch.rand(self.timesteps, device=self.device))
         self.blur_levels = torch.cumsum(self.blur_levels_t, dim=0)
 
@@ -81,6 +81,29 @@ class Blurring(GaussianDiffusion):
         return (self.blur_eigen_vectors @
                 (eigenvalues * self.blur_eigen_vectors.t())).view(
                     batch_size, self.img_dim ** 2, self.img_dim ** 2)
+
+    @torch.no_grad()
+    def sample(self, batch_size, x=None, deterministic=False):
+        """Samples from the diffusion process, producing images from noise
+
+        Repeatedly takes samples from p(x_{t-1}|x_t) for each t
+        """
+        shape = (batch_size, self.img_channels, self.img_dim, self.img_dim)
+        if x is None:
+            t = torch.tensor([self.timesteps - 1] * batch_size,
+                             device=self.device)
+            transformation_matrices = self._forward_sample(None, t)
+            x = torch.randn(
+                (batch_size, self.img_dim ** 2, 1),
+                device=self.device)
+            x = torch.bmm(
+                transformation_matrices, x).view(* shape)
+        xs = []
+
+        for t in reversed(range(self.timesteps)):
+            x = self.p_sample(x, t, deterministic=(t==0 or deterministic))
+            xs.append(x.cpu().numpy())
+        return xs
 
     def _forward_eigenvalues(self, x0, time):
         if self.fixed_blur:
@@ -130,20 +153,6 @@ class Blurring(GaussianDiffusion):
             noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
 
-    def _compute_prior_kl_divergence(self, x0, batch_size):
-        t = torch.tensor([self.timesteps - 1] * batch_size,
-                         device=self.device)
-        epsilon = 1e-3
-        eig_T = epsilon + self._forward_eigenvalues(None, t).view(batch_size, -1)
-        blur_eigs = epsilon + self.all_blur_eigen_values[-1][None, :]
-        trace = ((eig_T / blur_eigs) ** 2).sum(dim=1).mean()
-        mu_squared = 0
-        log_determinant = 2 * (
-            torch.log(eig_T).sum(dim=1).mean()
-            - torch.log(blur_eigs).sum())
-        # print(trace, log_determinant)
-        return 0.5 * (trace + mu_squared - log_determinant - 784)
-
     def loss_at_step_t(self, x0, t, loss_weights, loss_type='l1', noise=None):
         if noise is None:
             noise = torch.randn_like(x0)
@@ -160,12 +169,6 @@ class Blurring(GaussianDiffusion):
         prediction = torch.bmm(
             transformation_matrices,
             self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
-        reverse_model_loss = self.p_loss_at_step_t(target, prediction, 'l2')
+        total_loss = self.p_loss_at_step_t(target, prediction, 'l2')
 
-        kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
-        total_loss = (reverse_model_loss
-                      + kl_divergence / self.timesteps)
-        return total_loss, {
-            'reverse_model_loss': reverse_model_loss.item(),
-            'kl_divergence': kl_divergence.item(),
-        }
+        return total_loss, {}
