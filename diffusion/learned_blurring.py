@@ -100,7 +100,7 @@ class Blurring(GaussianDiffusion):
                              device=self.device)
             transformation_matrices = self._forward_sample(None, t)
             x = torch.randn(
-                (batch_size, self.img_channels ** 2, 1),
+                (batch_size, self.img_dim ** 2, 1),
                 device=self.device)
             x = torch.bmm(
                 transformation_matrices, x).view(* shape)
