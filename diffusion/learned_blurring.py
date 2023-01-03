@@ -88,6 +88,29 @@ class Blurring(GaussianDiffusion):
         eigenvalues = self._forward_eigenvalues(x0, time)
         return self._construct_blur_matrix(eigenvalues)
 
+    @torch.no_grad()
+    def sample(self, batch_size, x=None, deterministic=False):
+        """Samples from the diffusion process, producing images from noise
+
+        Repeatedly takes samples from p(x_{t-1}|x_t) for each t
+        """
+        shape = (batch_size, self.img_channels, self.img_dim, self.img_dim)
+        if x is None:
+            t = torch.tensor([self.timesteps - 1] * batch_size,
+                             device=self.device)
+            transformation_matrices = self._forward_sample(None, t)
+            x = torch.randn(
+                (batch_size, self.img_channels ** 2, 1),
+                device=self.device)
+            x = torch.bmm(
+                transformation_matrices, x).view(* shape)
+        xs = []
+
+        for t in reversed(range(self.timesteps)):
+            x = self.p_sample(x, t, deterministic=(t==0 or deterministic))
+            xs.append(x.cpu().numpy())
+        return xs
+
     def q_sample(self, x0, t, noise=None):
         """Samples from the forward diffusion process q.
 
@@ -98,11 +121,11 @@ class Blurring(GaussianDiffusion):
         original_batch_shape = x0.shape
         batch_size = original_batch_shape[0]
         transformation_matrices = self._forward_sample(x0, t)
-        x0 = x0.view(batch_size, self.img_dim ** 2, 1)
-        blurred_images = torch.bmm(
-            transformation_matrices, x0).view(
-                * original_batch_shape)
-        x_t = self._add_noise(blurred_images, t, noise)
+        noisy_images = self._add_noise(x0, t, noise).view(
+            batch_size, self.img_dim ** 2, 1)
+        x_t = torch.bmm(
+            transformation_matrices,
+            noisy_images).view(* original_batch_shape)
         return x_t
 
     @torch.no_grad()
