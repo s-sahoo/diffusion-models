@@ -147,10 +147,14 @@ class Blurring(GaussianDiffusion):
         x_t = self.q_sample(x0=x0, t=t, noise=noise)
 
         # reverse model loss
-        reverse_model_loss = self.p_loss_at_step_t(
-            x0 - x_t,
-            self.reverse_model(x_t, t),
-            loss_type)
+        transformation_matrices = self._forward_sample(x0, t)
+        target = torch.bmm(
+            transformation_matrices,
+            (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))
+        prediction = torch.bmm(
+            transformation_matrices,
+            self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
+        reverse_model_loss = self.p_loss_at_step_t(target, prediction, 'l2')
 
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
         total_loss = (reverse_model_loss
