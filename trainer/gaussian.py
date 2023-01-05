@@ -51,7 +51,7 @@ class Trainer():
         if self.weighted_time_sample:
             print('Using weighted time samples.')
             self.time_weights = 1 / (
-                0.1  + self.sqrt_bar_alphas ** 2)
+                0.1  + self.model.sqrt_bar_alphas ** 2)
             self.loss_weights=self.time_weights.sum()
         else:
             self.loss_weights = 1.0
@@ -73,7 +73,7 @@ class Trainer():
                 if self.weighted_time_sample:
                     t = torch.multinomial(
                         self.time_weights, batch_size,
-                        replacement=True).long()
+                        replacement=True).long().to(self.model.device)
                 else:
                     t = torch.randint(
                         0, self.model.timesteps, (batch_size,),
