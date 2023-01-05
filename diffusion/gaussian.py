@@ -41,7 +41,6 @@ class GaussianDiffusion(nn.Module):
         sqrt_one_minus_bar_alphas_t = get_by_idx(
             self.sqrt_one_minus_bar_alphas, t, x0.shape
         )
-
         return (sqrt_bar_alphas_t * x0 
                 + sqrt_one_minus_bar_alphas_t * noise)
 
