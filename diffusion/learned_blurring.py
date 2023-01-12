@@ -73,8 +73,6 @@ class Blurring(GaussianDiffusion):
             dtype=torch.float32)
         self.blur_params = torch.nn.Parameter(
             torch.rand(self.timesteps, device=self.device))
-        self.blur_levels = torch.cumsum(
-            torch.nn.functional.softplus(self.blur_params), dim=0)
         self.identity = torch.eye(
             self.img_dim ** 2,
             dtype=torch.float32,
@@ -111,11 +109,14 @@ class Blurring(GaussianDiffusion):
         return xs
 
     def _forward_eigenvalues(self, x0, time):
+        # print(self.fixed_blur, type(self.fixed_blur))
         if self.fixed_blur:
             return self.all_blur_eigen_values[time]
+        blur_levels = torch.cumsum(
+            torch.nn.functional.softplus(self.blur_params), dim=0)
+        blur_levels_t = blur_levels[time][:, None]
         base_eigen_value = self.all_blur_eigen_values[0][None, :]
-        blur_levels = self.blur_levels[time][:, None]
-        return torch.exp(blur_levels * torch.log(base_eigen_value))
+        return torch.exp(blur_levels_t * torch.log(base_eigen_value))
         # return self.forward_matrix(self.reverse_model.time_mlp(time))
 
     def _forward_sample(self, x0, time):
