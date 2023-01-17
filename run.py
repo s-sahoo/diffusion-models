@@ -52,6 +52,8 @@ def make_parser():
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
         help='Dont scale image in the forward pass')
+    train_parser.add_argument('--blur_no_reparam', type=bool, default=False,
+        help='Dont further reparameterize blur variables.')
     train_parser.add_argument('--fixed_blur', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--dataset', default='fashion-mnist',
@@ -265,6 +267,7 @@ def create_blur(config, device):
         timesteps=config.timesteps,
         device=device,
         drop_forward_coef=args.drop_forward_coef,
+        blur_no_reparam=args.blur_no_reparam,
     )
 
 

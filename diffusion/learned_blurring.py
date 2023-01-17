@@ -49,10 +49,11 @@ class Blurring(GaussianDiffusion):
     def __init__(
         self, noise_model, forward_matrix, reverse_model, timesteps,
         img_shape, fixed_blur=False, schedule='cosine', device='cpu',
-        drop_forward_coef=False):
+        drop_forward_coef=False, blur_no_reparam=False):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
         self.drop_forward_coef = drop_forward_coef
+        self.blur_no_reparam = blur_no_reparam
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
         self.base_blur_matrix = torch.tensor(
@@ -110,14 +111,20 @@ class Blurring(GaussianDiffusion):
             xs.append(x.cpu().numpy())
         return xs
 
+    def _get_blur_params(self, time):
+        if self.blur_no_reparam:
+            blur_levels = self.blur_params
+        else:
+            blur_levels = torch.cumsum(
+                torch.nn.functional.softplus(self.blur_params), dim=0)
+            blur_levels = (blur_levels - self.blur_params).detach() + self.blur_params
+        return blur_levels[time][:, None]
+
     def _forward_eigenvalues(self, x0, time):
         # print(self.fixed_blur, type(self.fixed_blur))
         if self.fixed_blur:
             return self.all_blur_eigen_values[time]
-        blur_levels = torch.cumsum(
-            torch.nn.functional.softplus(self.blur_params), dim=0)
-        blur_levels = (blur_levels - self.blur_params).detach() + self.blur_params
-        blur_levels_t = blur_levels[time][:, None]
+        blur_levels_t = self._get_blur_params(time)
         base_eigen_value = self.all_blur_eigen_values[0][None, :]
         return torch.exp(blur_levels_t * torch.log(base_eigen_value))
         # return self.forward_matrix(self.reverse_model.time_mlp(time))
