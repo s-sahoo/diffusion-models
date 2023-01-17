@@ -114,6 +114,7 @@ class Blurring(GaussianDiffusion):
             return self.all_blur_eigen_values[time]
         blur_levels = torch.cumsum(
             torch.nn.functional.softplus(self.blur_params), dim=0)
+        blur_levels = (blur_levels - self.blur_params).detach() + self.blur_params
         blur_levels_t = blur_levels[time][:, None]
         base_eigen_value = self.all_blur_eigen_values[0][None, :]
         return torch.exp(blur_levels_t * torch.log(base_eigen_value))
