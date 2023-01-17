@@ -48,9 +48,11 @@ class Blurring(GaussianDiffusion):
     """Implements the core learning and inference algorithms."""
     def __init__(
         self, noise_model, forward_matrix, reverse_model, timesteps,
-        img_shape, fixed_blur=False, schedule='cosine', device='cpu'):
+        img_shape, fixed_blur=False, schedule='cosine', device='cpu',
+        drop_forward_coef=False):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
+        self.drop_forward_coef = drop_forward_coef
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
         self.base_blur_matrix = torch.tensor(

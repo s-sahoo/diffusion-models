@@ -50,6 +50,8 @@ def make_parser():
         help='reparameterization type for input time diffusion model.')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
+    train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
+        help='Dont scale image in the forward pass')
     train_parser.add_argument('--fixed_blur', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--dataset', default='fashion-mnist',
@@ -252,20 +254,17 @@ def create_blur(config, device):
         dim=config.img_dim,
         channels=config.img_channels,
         dim_mults=(1, 2, 4,)).to(device)
-    forward_matrix = feedforward.Net(
-        input_size=config.img_dim * 4,
-        identity=False,
-        positive_outputs=True).to(device)
 
     return Blurring(
         noise_model=None,
-        forward_matrix=forward_matrix,
+        forward_matrix=None,
         reverse_model=reverse_model,
         fixed_blur=args.fixed_blur,
         schedule=args.schedule,
         img_shape=img_shape,
         timesteps=config.timesteps,
         device=device,
+        drop_forward_coef=args.drop_forward_coef,
     )
 
 

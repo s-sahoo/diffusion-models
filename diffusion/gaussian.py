@@ -9,10 +9,10 @@ from .schedule import get_schedule, get_by_idx
 class GaussianDiffusion(nn.Module):
     """Implements the core learning and inference algorithms."""
     def __init__(
-        self, model, timesteps, img_shape, schedule='cosine', device='cpu'
-    ):
+        self, model, timesteps, img_shape, schedule='cosine', device='cpu'):
         super().__init__()
         self.model = model
+        self.drop_forward_coef = False
         self.timesteps = timesteps
         self.img_dim = img_shape[1]
         self.img_channels = img_shape[0]
@@ -35,13 +35,15 @@ class GaussianDiffusion(nn.Module):
         )
 
     def _add_noise(self, x0, t, noise):
-        sqrt_bar_alphas_t = get_by_idx(
-            self.sqrt_bar_alphas, t, x0.shape
-        )
+        if self.drop_forward_coef:
+            x0_coefficient = 1
+        else:
+            x0_coefficient = get_by_idx(
+                self.sqrt_bar_alphas, t, x0.shape)
         sqrt_one_minus_bar_alphas_t = get_by_idx(
             self.sqrt_one_minus_bar_alphas, t, x0.shape
         )
-        return (sqrt_bar_alphas_t * x0 
+        return (x0_coefficient * x0 
                 + sqrt_one_minus_bar_alphas_t * noise)
 
     def q_sample(self, x0, t, noise=None):
