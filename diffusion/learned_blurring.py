@@ -48,7 +48,7 @@ class Blurring(GaussianDiffusion):
     """Implements the core learning and inference algorithms."""
     def __init__(
         self, noise_model, forward_matrix, reverse_model, timesteps,
-        img_shape, fixed_blur=False, schedule='cosine', device='cpu',
+        img_shape, blur_initializer, fixed_blur=False, schedule='cosine', device='cpu',
         drop_forward_coef=False, blur_no_reparam=False):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
@@ -75,11 +75,22 @@ class Blurring(GaussianDiffusion):
             device=self.device,
             dtype=torch.float32)
         self.blur_params = torch.nn.Parameter(
-            torch.rand(self.timesteps, device=self.device))
+            self._initialize_blur_params())
         self.identity = torch.eye(
             self.img_dim ** 2,
             dtype=torch.float32,
             device=self.device)[None, :, :]
+
+    def _initialize_blur_params(self, blur_initializer):
+        if blur_initializer == 'random':
+            return torch.rand(
+                self.timesteps, device=self.device)
+        elif blur_initializer == 'constant':
+            return torch.zeros(
+                self.timesteps, device=self.device)
+        elif blur_initializer == 'linear':
+            return torch.arange(
+                start=0, end=self.timesteps, device=self.device)
 
     def _construct_blur_matrix(self, eigenvalues):
         batch_size = eigenvalues.shape[0]
@@ -121,13 +132,11 @@ class Blurring(GaussianDiffusion):
         return blur_levels[time][:, None]
 
     def _forward_eigenvalues(self, x0, time):
-        # print(self.fixed_blur, type(self.fixed_blur))
         if self.fixed_blur:
             return self.all_blur_eigen_values[time]
         blur_levels_t = self._get_blur_params(time)
         base_eigen_value = self.all_blur_eigen_values[0][None, :]
         return torch.exp(blur_levels_t * torch.log(base_eigen_value))
-        # return self.forward_matrix(self.reverse_model.time_mlp(time))
 
     def _forward_sample(self, x0, time):
         eigenvalues = self._forward_eigenvalues(x0, time)
