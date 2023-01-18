@@ -188,7 +188,6 @@ class Blurring(GaussianDiffusion):
 
     def _get_blur_matrices(self, x0, t, mask):
         transformation_matrices = self._forward_sample(x0, t)
-        
         if self.drop_forward_coef:
             blur_scale = 1
         else:
@@ -221,6 +220,7 @@ class Blurring(GaussianDiffusion):
         total_loss = reconstruction_loss + kl_divergence
 
         return total_loss, {
+            'total_loss': total_loss.item(),
             'reconstruction_loss': reconstruction_loss.item(),
             'kl_divergence': kl_divergence.item(),
         }
