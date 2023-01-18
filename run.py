@@ -46,6 +46,9 @@ def make_parser():
     train_parser.add_argument('--blur_initializer', default='linear',
         choices=['linear', 'zero', 'random'], 
         help='constants scheduler for the diffusion model.')
+    train_parser.add_argument('--loss_type', default='elbo',
+        choices=['elbo', 'soft_diffusion'], 
+        help='loss functions used in diffusion models.')
     train_parser.add_argument('--timesteps', type=int, default=200,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--reparam', type=int, default=1,
@@ -272,6 +275,7 @@ def create_blur(config, device):
         drop_forward_coef=args.drop_forward_coef,
         blur_no_reparam=args.blur_no_reparam,
         blur_initializer=args.blur_initializer,
+        loss_type=args.loss_type,
     )
 
 

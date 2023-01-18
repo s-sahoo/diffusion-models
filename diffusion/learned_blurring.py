@@ -49,9 +49,10 @@ class Blurring(GaussianDiffusion):
     def __init__(
         self, noise_model, forward_matrix, reverse_model, timesteps,
         img_shape, blur_initializer, fixed_blur=False, schedule='cosine', device='cpu',
-        drop_forward_coef=False, blur_no_reparam=False):
+        drop_forward_coef=False, blur_no_reparam=False, loss_type='elbo'):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
+        self.loss_type = loss_type
         self.drop_forward_coef = drop_forward_coef
         self.blur_no_reparam = blur_no_reparam
         self.forward_matrix = forward_matrix
@@ -204,10 +205,12 @@ class Blurring(GaussianDiffusion):
         x_t = self.q_sample(x0=x0, t=t, noise=noise)
 
         # reverse model loss
-        transformation_matrices = self._get_blur_matrices(
-            x0,
-            t - 1,
-            mask=(t == 0).type(x0.dtype)[:, None, None])
+        if self.loss_type == 'elbo':
+            transformation_matrices = self._get_blur_matrices(
+                x0, t - 1, mask=(t == 0).type(x0.dtype)[:, None, None])
+        elif self.loss_type == 'soft_diffusion':
+            transformation_matrices = self._get_blur_matrices(
+                x0, t, mask=torch.zeros_like(x0))
 
         target = torch.bmm(
             transformation_matrices,
