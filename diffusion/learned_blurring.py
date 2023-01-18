@@ -76,7 +76,7 @@ class Blurring(GaussianDiffusion):
             device=self.device,
             dtype=torch.float32)
         self.blur_params = torch.nn.Parameter(
-            self._initialize_blur_params())
+            self._initialize_blur_params(blur_initializer))
         self.identity = torch.eye(
             self.img_dim ** 2,
             dtype=torch.float32,
@@ -84,10 +84,10 @@ class Blurring(GaussianDiffusion):
 
     def _initialize_blur_params(self, blur_initializer):
         if blur_initializer == 'random':
-            return torch.rand(
-                self.timesteps, device=self.device)
-        elif blur_initializer == 'constant':
-            return torch.zeros(
+            return torch.rand(self.timesteps, device=self.device)
+        elif blur_initializer == 'zero':
+            # softplus of -3 is close to 0.
+            return -3 * torch.ones(
                 self.timesteps, device=self.device)
         elif blur_initializer == 'linear':
             return torch.arange(
@@ -124,11 +124,9 @@ class Blurring(GaussianDiffusion):
         return xs
 
     def _get_blur_params(self, time):
-        if self.blur_no_reparam:
-            blur_levels = self.blur_params
-        else:
-            blur_levels = torch.cumsum(
-                torch.nn.functional.softplus(self.blur_params), dim=0)
+        blur_levels = torch.nn.functional.softplus(self.blur_params)
+        if not self.blur_no_reparam:
+            blur_levels = torch.cumsum(blur_levels, dim=0)
             blur_levels = (blur_levels - self.blur_params).detach() + self.blur_params
         return blur_levels[time][:, None]
 
@@ -181,10 +179,14 @@ class Blurring(GaussianDiffusion):
 
     def _compute_prior_kl_divergence(self, x0, batch_size):
         transformation_matrices = self._get_blur_matrices(
-            x0, t, mask=torch.zeros_like(x0))
+            x0,
+            torch.tensor([self.timesteps - 1] * batch_size,
+                device=self.device),
+            mask=0)
         mu_squared = torch.bmm(
             transformation_matrices,
             x0.view(batch_size, self.img_dim ** 2, 1))
+        mu_squared = (mu_squared ** 2).view(batch_size, -1).sum(dim=1).mean()
         return 0.5 * mu_squared
 
     def _get_blur_matrices(self, x0, t, mask):
@@ -192,7 +194,10 @@ class Blurring(GaussianDiffusion):
         if self.drop_forward_coef:
             blur_scale = 1
         else:
-            blur_scale = get_by_idx(self.sqrt_bar_alphas, t, x0.shape)
+            blur_scale = get_by_idx(
+                self.sqrt_bar_alphas,
+                t * (t >= 0),
+                transformation_matrices.shape)
         return ((1 - mask) * blur_scale * transformation_matrices
                 + mask * self.identity)
 
@@ -204,13 +209,13 @@ class Blurring(GaussianDiffusion):
         batch_size = x0.shape[0]
         x_t = self.q_sample(x0=x0, t=t, noise=noise)
 
-        # reverse model loss
+        # print(t)
         if self.loss_type == 'elbo':
             transformation_matrices = self._get_blur_matrices(
                 x0, t - 1, mask=(t == 0).type(x0.dtype)[:, None, None])
         elif self.loss_type == 'soft_diffusion':
             transformation_matrices = self._get_blur_matrices(
-                x0, t, mask=torch.zeros_like(x0))
+                x0, t, mask=0)
 
         target = torch.bmm(
             transformation_matrices,
@@ -220,7 +225,7 @@ class Blurring(GaussianDiffusion):
             self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
         reconstruction_loss = self.p_loss_at_step_t(target, prediction, 'l2')
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
-        total_loss = reconstruction_loss + kl_divergence
+        total_loss = reconstruction_loss + kl_divergence / self.timesteps
 
         return total_loss, {
             'total_loss': total_loss.item(),

@@ -43,7 +43,7 @@ def make_parser():
     train_parser.add_argument('--schedule', default='cosine',
         choices=['linear', 'cosine'], 
         help='constants scheduler for the diffusion model.')
-    train_parser.add_argument('--blur_initializer', default='linear',
+    train_parser.add_argument('--blur_initializer', default='random',
         choices=['linear', 'zero', 'random'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--loss_type', default='elbo',
