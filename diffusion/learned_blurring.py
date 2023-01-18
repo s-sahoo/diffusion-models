@@ -178,6 +178,24 @@ class Blurring(GaussianDiffusion):
             noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
 
+    def _compute_prior_kl_divergence(self, x0, batch_size):
+        transformation_matrices = self._get_blur_matrices(
+            x0, t, mask=torch.zeros_like(x0))
+        mu_squared = torch.bmm(
+            transformation_matrices,
+            x0.view(batch_size, self.img_dim ** 2, 1))
+        return 0.5 * mu_squared
+
+    def _get_blur_matrices(self, x0, t, mask):
+        transformation_matrices = self._forward_sample(x0, t)
+        
+        if self.drop_forward_coef:
+            blur_scale = 1
+        else:
+            blur_scale = get_by_idx(self.sqrt_bar_alphas, t, x0.shape)
+        return ((1 - mask) * blur_scale * transformation_matrices
+                + mask * self.identity)
+
     def loss_at_step_t(self, x0, t, loss_weights, loss_type='l1', noise=None):
         if noise is None:
             noise = torch.randn_like(x0)
@@ -187,17 +205,22 @@ class Blurring(GaussianDiffusion):
         x_t = self.q_sample(x0=x0, t=t, noise=noise)
 
         # reverse model loss
-        mask = (t == 0).type(x0.dtype)[:, None, None]
-        transformation_matrices = self._forward_sample(x0, t - 1)
-        transformation_matrices = (
-            (1 - mask) * transformation_matrices
-            + mask * self.identity)
+        transformation_matrices = self._get_blur_matrices(
+            x0,
+            t - 1,
+            mask=(t == 0).type(x0.dtype)[:, None, None])
+
         target = torch.bmm(
             transformation_matrices,
             (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))
         prediction = torch.bmm(
             transformation_matrices,
             self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
-        total_loss = self.p_loss_at_step_t(target, prediction, 'l2')
+        reconstruction_loss = self.p_loss_at_step_t(target, prediction, 'l2')
+        kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
+        total_loss = reconstruction_loss + kl_divergence
 
-        return total_loss, {}
+        return total_loss, {
+            'reconstruction_loss': reconstruction_loss.item(),
+            'kl_divergence': kl_divergence.item(),
+        }
