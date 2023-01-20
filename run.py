@@ -14,6 +14,7 @@ from diffusion.gaussian import GaussianDiffusion
 from diffusion.auxiliary import InfoMaxDiffusion
 from diffusion.learned import LearnedGaussianDiffusion
 from diffusion.learned_blurring import Blurring
+from diffusion.learned_masking import Masking
 from diffusion.learned_input_and_time import LearnedGaussianDiffusionInputTime
 from diffusion.learned_input_and_time import InputTimeReparam2
 from diffusion.learned_input_and_time import InputTimeReparam3
@@ -38,10 +39,13 @@ def make_parser():
     train_parser.set_defaults(func=train)
 
     train_parser.add_argument('--model', default='gaussian',
-        choices=['gaussian', 'infomax', 'blur', 'learned', 'learned_input_time'], 
+        choices=['gaussian', 'infomax', 'blur', 'masking', 'learned', 'learned_input_time'], 
         help='type of ddpm model to run')
     train_parser.add_argument('--schedule', default='cosine',
         choices=['linear', 'cosine'], 
+        help='constants scheduler for the diffusion model.')
+    train_parser.add_argument('--transform_type', default='blur',
+        choices=['blur', 'learnable_forward'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--blur_initializer', default='random',
         choices=['linear', 'zero', 'random'], 
@@ -58,6 +62,10 @@ def make_parser():
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
         help='Dont scale image in the forward pass')
+    train_parser.add_argument('--fixed_masking', type=bool, default=False,
+        help='Fixed Masking.')
+    train_parser.add_argument('--margin', type=float, default=0.0,
+        help='margin for the weights.')
     train_parser.add_argument('--blur_no_reparam', type=bool, default=False,
         help='Dont further reparameterize blur variables.')
     train_parser.add_argument('--fixed_blur', type=bool, default=False,
@@ -184,6 +192,8 @@ def get_model(config, device):
         model = create_learned(config, device)
     elif args.model == 'learned_input_time':
         model = create_learned_input_time(config, device, args.reparam)
+    elif args.model == 'masking':
+        model = create_masked(config, device)
     else:
         raise ValueError(args.model)
     return model
@@ -255,6 +265,27 @@ def create_learned(config, device):
         device=device,
     )
 
+def create_masked(config, device):
+    img_shape = [config.img_channels, config.img_dim, config.img_dim]
+
+    reverse_model = colab_UNet(
+        dim=config.img_dim,
+        channels=config.img_channels,
+        dim_mults=(1, 2, 4,)).to(device)
+
+    return Masking(
+        noise_model=None,
+        forward_matrix=None,
+        reverse_model=reverse_model,
+        fixed_masking=args.fixed_masking,
+        schedule=args.schedule,
+        img_shape=img_shape,
+        timesteps=config.timesteps,
+        device=device,
+        loss_type=args.loss_type,
+        margin=args.margin,
+    )
+
 
 def create_blur(config, device):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
@@ -276,6 +307,7 @@ def create_blur(config, device):
         blur_no_reparam=args.blur_no_reparam,
         blur_initializer=args.blur_initializer,
         loss_type=args.loss_type,
+        transform_type=args.transform_type,
     )
 
 
