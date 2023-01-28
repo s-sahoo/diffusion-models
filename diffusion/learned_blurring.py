@@ -108,13 +108,13 @@ class Blurring(GaussianDiffusion):
 
     def _construct_transform_matrix(self, eigenvalues):
         batch_size = eigenvalues.shape[0]
-        eigenvalues = eigenvalues.view(batch_size, self.img_dim ** 2, 1)
         if self.transform_type == 'blur':
-            eigen_vectors = self.blur_eigen_vectors
+            eigen_vectors = self.eigen_vectors
         else:
-            eigen_vectors = self.blur_eigen_vectors.weight
+            eigen_vectors = self.eigen_vectors.weight
             eigen_values = torch.nn.functional.softplus(
-                self.blur_eigen_values)
+                self.eigen_values)
+        eigenvalues = eigenvalues.view(batch_size, self.img_dim ** 2, 1)
         return (eigen_vectors @ (eigenvalues * eigen_vectors.t())).view(
                     batch_size, self.img_dim ** 2, self.img_dim ** 2)
 

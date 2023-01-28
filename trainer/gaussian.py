@@ -63,11 +63,10 @@ class Trainer():
     def fit(self, data_loader, epochs):
         for epoch in range(epochs):
             metrics_per_epoch = collections.defaultdict(list)
-            for step, batch in enumerate(data_loader):
+            for step, (batch, _) in enumerate(data_loader):
                 self.optimizer.zero_grad()
-
-                batch_size = batch['pixel_values'].shape[0]
-                batch = batch['pixel_values'].to(self.model.device)
+                batch_size = batch.shape[0]
+                batch = batch.to(self.model.device)
 
                 # Algorithm 1 line 3: sample t uniformally for every example in the batch
                 if self.weighted_time_sample:
