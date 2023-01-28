@@ -48,64 +48,65 @@ class Blurring(GaussianDiffusion):
     """Implements the core learning and inference algorithms."""
     def __init__(
         self, noise_model, forward_matrix, reverse_model, timesteps,
-        img_shape, blur_initializer, fixed_blur=False, schedule='cosine',
-        device='cpu', drop_forward_coef=False, blur_no_reparam=False,
+        img_shape, level_initializer, fixed_blur=False, schedule='cosine',
+        device='cpu', drop_forward_coef=False, levels_no_reparam=False,
         loss_type='elbo', transform_type='blur'):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
         self.loss_type = loss_type
         self.drop_forward_coef = drop_forward_coef
-        self.blur_no_reparam = blur_no_reparam
+        self.levels_no_reparam = levels_no_reparam
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
-        self.base_blur_matrix = torch.tensor(
-            conv_to_dense(gaussian_kernel(sigma=0.35), self.img_dim),
-            device=self.device,
-            dtype=torch.float32)
         self.reverse_model = reverse_model
         
         self.transform_type = transform_type
         self.fixed_blur = fixed_blur
         if self.transform_type == 'blur':
+            self.base_blur_matrix = torch.tensor(
+                conv_to_dense(
+                    gaussian_kernel(l=2 * (self.img_dim // 2) - 1,
+                                    sigma=0.35),
+                    self.img_dim),
+                device=self.device,
+                dtype=torch.float32)
             print('Using fixed blur', fixed_blur)
             eigen_values, eigen_vectors = eigen_value_decomposition(
                 self.base_blur_matrix.detach().cpu().numpy())
-            self.blur_eigen_values = torch.tensor(
+            self.eigen_values = torch.tensor(
                 eigen_values, device=self.device, dtype=torch.float32)
-            self.blur_eigen_vectors = torch.tensor(
+            self.eigen_vectors = torch.tensor(
                 eigen_vectors, device=self.device, dtype=torch.float32)
-            self.all_blur_eigen_values = torch.tensor(
+            self.all_eigen_values = torch.tensor(
                 [eigen_values ** i for i in range(1, timesteps + 1)],
                 device=self.device,
                 dtype=torch.float32)
-            self.base_eigen_value = self.all_blur_eigen_values[0]
         elif self.transform_type == 'learnable_forward':
-            print('Transform:', self.transform_type)
-            self.blur_eigen_vectors = torch.nn.utils.parametrizations.orthogonal(
+            print('Transform: learnable_forward')
+            self.eigen_vectors = torch.nn.utils.parametrizations.orthogonal(
                 nn.Linear(self.img_dim ** 2, self.img_dim ** 2,
                           device=self.device))
-            self.blur_eigen_values = torch.nn.Parameter(
-                torch.rand(self.img_dim ** 2, device=self.device))
-            self.base_eigen_value = self.blur_eigen_values
-        self.blur_params = torch.nn.Parameter(
-            self._initialize_blur_params(blur_initializer))
+            self.eigen_values = torch.nn.Parameter(
+                torch.ones(self.img_dim ** 2, device=self.device))
+        self.levels = torch.nn.Parameter(
+            self._initialize_levels(level_initializer))
         self.identity = torch.eye(
             self.img_dim ** 2,
             dtype=torch.float32,
             device=self.device)[None, :, :]
 
-    def _initialize_blur_params(self, blur_initializer):
-        if blur_initializer == 'random':
+    def _initialize_levels(self, level_initializer):
+        if level_initializer == 'random':
             return torch.rand(self.timesteps, device=self.device)
-        elif blur_initializer == 'zero':
+        elif level_initializer == 'zero':
             # softplus of -3 is close to 0.
             return -3 * torch.ones(
                 self.timesteps, device=self.device)
-        elif blur_initializer == 'linear':
+        elif level_initializer == 'linear':
             return torch.arange(
                 start=0, end=self.timesteps, device=self.device)
 
-    def _construct_blur_matrix(self, eigenvalues):
+    def _construct_transform_matrix(self, eigenvalues):
         batch_size = eigenvalues.shape[0]
         eigenvalues = eigenvalues.view(batch_size, self.img_dim ** 2, 1)
         if self.transform_type == 'blur':
@@ -134,23 +135,23 @@ class Blurring(GaussianDiffusion):
             xs.append(x.cpu().numpy())
         return xs
 
-    def _get_blur_params(self, time):
-        blur_levels = torch.nn.functional.softplus(self.blur_params)
-        if not self.blur_no_reparam:
+    def _get_levels(self, time):
+        blur_levels = torch.nn.functional.softplus(self.levels)
+        if not self.levels_no_reparam:
             blur_levels = torch.cumsum(blur_levels, dim=0)
-            blur_levels = (blur_levels - self.blur_params).detach() + self.blur_params
+            blur_levels = (blur_levels - self.levels).detach() + self.levels
         return blur_levels[time][:, None]
 
     def _forward_eigenvalues(self, x0, time):
         if self.fixed_blur:
-            return self.all_blur_eigen_values[time]
-        blur_levels_t = self._get_blur_params(time)
-        return torch.exp(blur_levels_t * torch.log(
-            self.base_eigen_value[None, :]))
+            return self.all_eigen_values[time]
+        levels_t = self._get_levels(time)
+        return torch.exp(levels_t * torch.log(
+            self.eigen_values[None, :]))
 
-    def _forward_sample(self, x0, time):
+    def _get_transform_matrices(self, x0, time):
         eigenvalues = self._forward_eigenvalues(x0, time)
-        return self._construct_blur_matrix(eigenvalues)
+        return self._construct_transform_matrix(eigenvalues)
 
     def q_sample(self, x0, t, noise=None):
         """Samples from the forward diffusion process q.
@@ -161,7 +162,7 @@ class Blurring(GaussianDiffusion):
             noise = torch.randn_like(x0)
         original_batch_shape = x0.shape
         batch_size = original_batch_shape[0]
-        transformation_matrices = self._forward_sample(x0, t)
+        transformation_matrices = self._get_transform_matrices(x0, t)
         x0 = x0.view(batch_size, self.img_dim ** 2, 1)
         blurred_images = torch.bmm(
             transformation_matrices, x0).view(
@@ -189,7 +190,7 @@ class Blurring(GaussianDiffusion):
         return self.q_sample(x0_approx, t - 1, noise)
 
     def _compute_prior_kl_divergence(self, x0, batch_size):
-        transformation_matrices = self._get_blur_matrices(
+        transformation_matrices = self._get_effective_transform_matrices(
             x0,
             torch.tensor([self.timesteps - 1] * batch_size,
                 device=self.device),
@@ -200,8 +201,8 @@ class Blurring(GaussianDiffusion):
         mu_squared = (mu_squared ** 2).view(batch_size, -1).sum(dim=1).mean()
         return 0.5 * mu_squared
 
-    def _get_blur_matrices(self, x0, t, mask):
-        transformation_matrices = self._forward_sample(x0, t)
+    def _get_effective_transform_matrices(self, x0, t, mask):
+        transformation_matrices = self._get_transform_matrices(x0, t)
         if self.drop_forward_coef:
             blur_scale = 1
         else:
@@ -222,12 +223,12 @@ class Blurring(GaussianDiffusion):
 
         # print(t)
         if self.loss_type == 'elbo':
-            transformation_matrices = self._get_blur_matrices(
+            transformation_matrices = self._get_effective_transform_matrices(
                 x0, t - 1, mask=(t == 0).type(x0.dtype)[:, None, None])
         elif self.loss_type == 'soft_diffusion':
-            transformation_matrices = self._get_blur_matrices(
+            transformation_matrices = self._get_effective_transform_matrices(
                 x0, t, mask=0)
-
+        transformation_matrices = transformation_matrices.detach()
         target = torch.bmm(
             transformation_matrices,
             (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))

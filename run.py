@@ -15,12 +15,6 @@ from diffusion.auxiliary import InfoMaxDiffusion
 from diffusion.learned import LearnedGaussianDiffusion
 from diffusion.learned_blurring import Blurring
 from diffusion.learned_masking import Masking
-from diffusion.learned_input_and_time import LearnedGaussianDiffusionInputTime
-from diffusion.learned_input_and_time import InputTimeReparam2
-from diffusion.learned_input_and_time import InputTimeReparam3
-from diffusion.learned_input_and_time import InputTimeReparam4
-from diffusion.learned_input_and_time import InputTimeReparam5
-from diffusion.learned_input_and_time import InputTimeReparam6
 from models.modules.encoders import ConvGaussianEncoder
 from data.fashion_mnist import FashionMNISTConfig
 from trainer.gaussian import Trainer, process_images
@@ -39,36 +33,17 @@ def make_parser():
     train_parser.set_defaults(func=train)
 
     train_parser.add_argument('--model', default='gaussian',
-        choices=['gaussian', 'infomax', 'blur', 'masking', 'learned', 'learned_input_time'], 
+        choices=['gaussian', 'infomax', 'blur', 'masking', 'learned'], 
         help='type of ddpm model to run')
     train_parser.add_argument('--schedule', default='cosine',
         choices=['linear', 'cosine'], 
-        help='constants scheduler for the diffusion model.')
-    train_parser.add_argument('--transform_type', default='blur',
-        choices=['blur', 'learnable_forward'], 
-        help='constants scheduler for the diffusion model.')
-    train_parser.add_argument('--blur_initializer', default='random',
-        choices=['linear', 'zero', 'random'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--loss_type', default='elbo',
         choices=['elbo', 'soft_diffusion'], 
         help='loss functions used in diffusion models.')
     train_parser.add_argument('--timesteps', type=int, default=200,
         help='total number of timesteps in the diffusion model')
-    train_parser.add_argument('--reparam', type=int, default=1,
-        choices=[1, 2, 3, 4, 5, 6], 
-        help='reparameterization type for input time diffusion model.')
     train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
-        help='total number of timesteps in the diffusion model')
-    train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
-        help='Dont scale image in the forward pass')
-    train_parser.add_argument('--fixed_masking', type=bool, default=False,
-        help='Fixed Masking.')
-    train_parser.add_argument('--margin', type=float, default=0.0,
-        help='margin for the weights.')
-    train_parser.add_argument('--blur_no_reparam', type=bool, default=False,
-        help='Dont further reparameterize blur variables.')
-    train_parser.add_argument('--fixed_blur', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--dataset', default='fashion-mnist',
         choices=['fashion-mnist', 'mnist'], help='training dataset')
@@ -84,7 +59,25 @@ def make_parser():
         help='optimization algorithm')
     train_parser.add_argument('--folder', default='.',
         help='folder where logs will be stored')
-
+    # masking parameters
+    train_parser.add_argument('--fixed_masking', type=bool, default=False,
+        help='Fixed Masking.')
+    train_parser.add_argument('--margin', type=float, default=0.0,
+        help='margin for the weights.')
+    # blur parameters
+    train_parser.add_argument('--transform_type', default='blur',
+        choices=['blur', 'learnable_forward'], 
+        help='constants scheduler for the diffusion model.')
+    train_parser.add_argument('--level_initializer', default='random',
+        choices=['linear', 'zero', 'random'], 
+        help='constants scheduler for the diffusion model.')
+    train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
+        help='Dont scale image in the forward pass')
+    train_parser.add_argument('--levels_no_reparam', type=bool, default=False,
+        help='Dont further reparameterize blur variables.')
+    train_parser.add_argument('--fixed_blur', type=bool, default=False,
+        help='total number of timesteps in the diffusion model')
+    
     # eval
 
     eval_parser = subparsers.add_parser('eval')
@@ -204,8 +197,7 @@ def create_gaussian(config, device):
         channels=config.unet_channels,
         chan_mults=config.unet_mults,
         img_shape=img_shape,
-    )
-    model.to(device)
+    ).to(device)
 
     return GaussianDiffusion(
         model=model,
@@ -243,23 +235,23 @@ def create_infomax(config, device):
 
 def create_learned(config, device):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
+    z_shape = img_shape.copy()
+
+    z_encoder = ConvGaussianEncoder(
+        img_shape=img_shape,
+        a_shape=z_shape,
+    ).to(device)
 
     model = UNet(
         channels=config.unet_channels,
         chan_mults=config.unet_mults,
         img_shape=img_shape,
-    ).to(device)
-
-    forward_matrix = feedforward.Net(
-        input_size=model.time_channels,
-        identity=False,
-        positive_outputs=True,
-    ).to(device)
+    )
+    model.to(device)
 
     return LearnedGaussianDiffusion(
         noise_model=model,
-        schedule=args.schedule,
-        forward_matrix=forward_matrix,
+        z_encoder_model=z_encoder,
         img_shape=img_shape,
         timesteps=config.timesteps,
         device=device,
@@ -268,10 +260,11 @@ def create_learned(config, device):
 def create_masked(config, device):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
 
-    reverse_model = colab_UNet(
-        dim=config.img_dim,
-        channels=config.img_channels,
-        dim_mults=(1, 2, 4,)).to(device)
+    reverse_model = UNet(
+        channels=config.unet_channels,
+        chan_mults=config.unet_mults,
+        img_shape=img_shape,
+    ).to(device)
 
     return Masking(
         noise_model=None,
@@ -289,10 +282,11 @@ def create_masked(config, device):
 
 def create_blur(config, device):
     img_shape = [config.img_channels, config.img_dim, config.img_dim]
-    reverse_model = colab_UNet(
-        dim=config.img_dim,
-        channels=config.img_channels,
-        dim_mults=(1, 2, 4,)).to(device)
+    reverse_model = UNet(
+        channels=config.unet_channels,
+        chan_mults=config.unet_mults,
+        img_shape=img_shape,
+    ).to(device)
 
     return Blurring(
         noise_model=None,
@@ -304,57 +298,12 @@ def create_blur(config, device):
         timesteps=config.timesteps,
         device=device,
         drop_forward_coef=args.drop_forward_coef,
-        blur_no_reparam=args.blur_no_reparam,
-        blur_initializer=args.blur_initializer,
+        levels_no_reparam=args.levels_no_reparam,
+        level_initializer=args.level_initializer,
         loss_type=args.loss_type,
         transform_type=args.transform_type,
     )
 
-
-def create_learned_input_time(config, device, reparam):
-    img_shape = [config.img_channels, config.img_dim, config.img_dim]
-    diffusion_models = {
-        1: LearnedGaussianDiffusionInputTime,
-        2: InputTimeReparam2,
-        3: InputTimeReparam3,
-        4: InputTimeReparam4,
-        5: InputTimeReparam5,
-        6: InputTimeReparam6,
-    }
-    if reparam == 1 or reparam == 2 or reparam == 5 or reparam == 6:
-        model = UNet(
-            channels=config.unet_channels,
-            chan_mults=config.unet_mults,
-            img_shape=img_shape,
-        ).to(device)
-        reverse_model = UNet(
-            channels=config.unet_channels,
-            chan_mults=config.unet_mults,
-            img_shape=img_shape,
-        ).to(device)
-    else:
-        model = BiheadedUNet(
-            channels=config.unet_channels,
-            chan_mults=config.unet_mults,
-            img_shape=img_shape,
-        ).to(device)
-        reverse_model = None
-    forward_matrix = UNet(
-        channels=config.unet_channels,
-        chan_mults=config.unet_mults,
-        img_shape=img_shape,
-    ).to(device)
-
-    print('reparam type:', reparam)
-    return diffusion_models[reparam](
-        noise_model=model,
-        forward_matrix=forward_matrix,
-        reverse_model=reverse_model,
-        schedule=args.schedule,
-        img_shape=img_shape,
-        timesteps=config.timesteps,
-        device=device,
-    )
 
 # ----------------------------------------------------------------------------
 
