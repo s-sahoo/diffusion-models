@@ -10,7 +10,7 @@ from torchvision.utils import save_image
 from torchmetrics.image.inception import InceptionScore
 import PIL.Image as Image
 
-import metrics
+from cleanfid import fid
 
 
 def process_images(images, return_type='float'):
@@ -93,8 +93,7 @@ class Trainer():
                 self.optimizer.step()
             # save generated images
             self.save_images(epoch, step)
-            self.compute_fid_scores(batch, epoch)
-            self.compute_inception_scores(epoch)
+            self.compute_fid_scores(batch_size, epoch)
             self.record_metrics(epoch, metrics_per_epoch)
             self.save_model(epoch)
             self.write_metrics()
@@ -109,22 +108,23 @@ class Trainer():
         for key, value in metrics.items():
             self.metrics[key].append(f'{epoch} {np.mean(value)}\n')
 
-
-    def compute_fid_scores(self, real_images, epoch):
-        samples = process_images(
-            self.model.sample(real_images.shape[0])[-1])
-        real_images = process_images(real_images.detach().cpu().numpy())
-        fid_mean = self.fid_score.calculate_frechet_distance(
-            real_images, samples)
+    def compute_fid_scores(self, batch_size, epoch):
+        def generate_images(z):
+            samples = model.sample(
+                x=z.view(batch_size, self.model.img_channels,
+                         self.model.img_dim, self.model.img_dim),
+                batch_size=batch_size)
+            return process_images(samples[-1], return_type='uint')
+        fid_mean = fid.compute_fid(
+            gen=generate_images,
+            dataset_name='fmnist',
+            dataset_res=self.model.img_dim,
+            batch_size=batch_size,
+            num_gen=batch_size,
+            dataset_split='custom',
+            z_dim=self.model.img_channels * self.model.img_dim ** 2)
         self.metrics['fid_score'].append(f'{epoch} {fid_mean}\n')
         print('FID score: {:.2f}'.format(fid_mean))
-
-    def compute_inception_scores(self, epoch):
-        fid_mean, fid_std = self.inception_score.compute_inception_scores(
-            process_images(self.model.sample(128)[-1],
-                           return_type='uint'))
-        self.metrics['is_score'].append(f'{epoch} {fid_mean}\n')
-        print('IS score: {:.2f} +- {:.2f}'.format(fid_mean, fid_std))
 
     def save_images(self, epoch, step):
         samples = torch.Tensor(self.model.sample(self.n_samples)[-1])

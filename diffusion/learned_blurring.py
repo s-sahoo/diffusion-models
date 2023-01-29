@@ -172,20 +172,17 @@ class Blurring(GaussianDiffusion):
 
     def _momentum_sampler(self, xt, t, t_index, deterministic=False):
         x0_approx = xt + self.reverse_model(xt, t)
-        print(x0_approx.shape)
         if t_index == 0:
             return x0_approx
         yt_hat = self.q_sample(x0_approx, t, torch.zeros_like(x0_approx))
         yt_minus_1_hat = self.q_sample(
             x0_approx, t - 1, torch.zeros_like(x0_approx))
-        print(yt_hat.shape)
         
         eta = torch.randn_like(x0_approx)
         
         epsilon = yt_hat - xt
         sigma = get_by_idx(
             self.sqrt_one_minus_bar_alphas, t, xt.shape)
-        print(sigma.shape)
         sigma_prev = get_by_idx(
             self.sqrt_one_minus_bar_alphas, t - 1, xt.shape)
         z = xt - ((sigma_prev / sigma) ** 2 - 1) * epsilon + torch.sqrt(

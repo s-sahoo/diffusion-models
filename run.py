@@ -21,7 +21,8 @@ from models.modules.encoders import ConvGaussianEncoder
 from trainer.gaussian import Trainer, process_images
 from misc.eval.sample import sample, viz_latents
 
-import metrics
+from cleanfid import fid
+
 # ----------------------------------------------------------------------------
 
 def make_parser():
@@ -173,30 +174,23 @@ def eval(args):
         sample(model, args.sample, path, args.deterministic)
 
     scores = {'fid_score': [], 'is_score': []}
-    fid_score = metrics.FID()
-    inception_score = metrics.InceptionMetric()
-    for batch, _ in data.get_dataset(args):
-        real_images = process_images(
-            batch.to(model.device).detach().cpu().numpy())
-        samples = model.sample(real_images.shape[0])[-1]
-        samples = process_images(samples)
-        fid_mean = fid_score.calculate_frechet_distance(
-            real_images, samples)
-        scores['fid_score'].append(fid_mean)
-        break
-        # is_mean, _ = inception_score.compute_inception_scores(
-        #     (255 * samples).type(torch.uint8))
-        # scores['is_score'].append(is_mean)
-    print('FID score: {:.2f}'.format(np.mean(scores['fid_score'])))
-    print('IS score: {:.2f}'.format(np.mean(scores['is_score'])))
+    def generate_images(z):
+        samples = model.sample(
+            x=z.view(args.batch_size, args.input_channels,
+                     args.input_size, args.input_size),
+            batch_size=args.batch_size)
+        return process_images(samples[-1], return_type='uint')
+    fid_mean = fid.compute_fid(
+        gen=generate_images,
+        dataset_name='fmnist',
+        dataset_res=args.input_size,
+        batch_size=args.batch_size,
+        num_gen=1280,
+        dataset_split='custom',
+        z_dim=args.input_channels * args.input_size ** 2)
+    print(f'FID score: {fid_mean}')
 
 # ----------------------------------------------------------------------------
-
-def get_config(args):
-    if args.dataset == 'fmnist':
-        return FashionMNISTConfig
-    else:
-        raise ValueError()
 
 def get_model(config, device):
     if args.model == 'gaussian':
@@ -332,6 +326,6 @@ def create_blur(config, device):
 # ----------------------------------------------------------------------------
 
 if __name__ == '__main__':
-  parser = make_parser()
-  args = parser.parse_args()
-  args.func(args)
+    parser = make_parser()
+    args = parser.parse_args()
+    args.func(args)
