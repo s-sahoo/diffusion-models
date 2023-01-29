@@ -238,6 +238,6 @@ def get_chairs(args):
         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
 
-    dataset = CustomImageFolder(root = args.data_dir+'/3DChairs', transform = transform)
+    dataset = CustomImageFolder(root=args.data_dir + '/3DChairs', transform = transform)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, drop_last = True, shuffle = True, num_workers = 4)
     return dataloader

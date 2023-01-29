@@ -116,7 +116,7 @@ class Masking(GaussianDiffusion):
         x_t = self._add_noise(masked_images, t, noise)
         return x_t
 
-    # def _momentum_sampler(self, xt):
+    # def _momentum_sampler(self, xt, t):
     #     x0_approx = xt + self.reverse_model(xt, t)
     #     yt_hat = self.q_sample(x0_approx, t, torch.zeros_like(x0_approx))
     #     yt_hat = self.q_sample(x0_approx, t, torch.zeros_like(x0_approx))
@@ -129,7 +129,7 @@ class Masking(GaussianDiffusion):
     #     sigma_prev = torch.sqrt(1 - bar_alphas_prev)
     #     z = x - ((sigma_prev / sigma) ** 2 - 1) * epsilon + (
     #         sigma_t ** 2 - sigma_prev ** 2).sqrt() * eta
-    #     z = 
+    #     return z + self.reverse_model(xt, t - 1) - x0_approx
 
     @torch.no_grad()
     def p_sample(self, xt, t_index, deterministic=False):

@@ -50,7 +50,7 @@ class Blurring(GaussianDiffusion):
         self, noise_model, forward_matrix, reverse_model, timesteps,
         img_shape, level_initializer, fixed_blur=False, schedule='cosine',
         device='cpu', drop_forward_coef=False, levels_no_reparam=False,
-        loss_type='elbo', transform_type='blur'):
+        loss_type='elbo', transform_type='blur', sampler='naive'):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
         self.loss_type = loss_type
@@ -59,7 +59,7 @@ class Blurring(GaussianDiffusion):
         self.forward_matrix = forward_matrix
         self.z_shape = img_shape
         self.reverse_model = reverse_model
-        
+        self.sampler = sampler
         self.transform_type = transform_type
         self.fixed_blur = fixed_blur
         if self.transform_type == 'blur':
@@ -170,24 +170,54 @@ class Blurring(GaussianDiffusion):
         x_t = self._add_noise(blurred_images, t, noise)
         return x_t
 
-    @torch.no_grad()
-    def p_sample(self, xt, t_index, deterministic=False):
-        """Samples from the reverse diffusion process p at time step t.
-
-        Generate image x_{t_index  - 1}.
-        """
-        batch_size = xt.shape[0]
-        original_batch_shape = xt.shape
-
-        t =  torch.full((batch_size,), t_index, device=self.device, dtype=torch.long)
+    def _momentum_sampler(self, xt, t, t_index, deterministic=False):
         x0_approx = xt + self.reverse_model(xt, t)
+        print(x0_approx.shape)
+        if t_index == 0:
+            return x0_approx
+        yt_hat = self.q_sample(x0_approx, t, torch.zeros_like(x0_approx))
+        yt_minus_1_hat = self.q_sample(
+            x0_approx, t - 1, torch.zeros_like(x0_approx))
+        print(yt_hat.shape)
+        
+        eta = torch.randn_like(x0_approx)
+        
+        epsilon = yt_hat - xt
+        sigma = get_by_idx(
+            self.sqrt_one_minus_bar_alphas, t, xt.shape)
+        print(sigma.shape)
+        sigma_prev = get_by_idx(
+            self.sqrt_one_minus_bar_alphas, t - 1, xt.shape)
+        z = xt - ((sigma_prev / sigma) ** 2 - 1) * epsilon + torch.sqrt(
+            sigma ** 2 - sigma_prev ** 2) * eta
+        return z + yt_minus_1_hat - yt_hat
 
+    def _naive_sampler(self, xt, t, t_index, deterministic=False):    
+        x0_approx = xt + self.reverse_model(xt, t)
         if t_index == 0:
             return x0_approx
         noise = None
         if deterministic:
             noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
+
+    @torch.no_grad()
+    def p_sample(self, xt, t_index, deterministic=False):
+        """Samples from the reverse diffusion process p at time step t.
+
+        Generate image x_{t_index  - 1}.
+        """
+        samplers = {
+            'momentum': self._momentum_sampler,
+            'naive': self._naive_sampler,
+        }
+        return samplers[self.sampler](
+            xt=xt,
+            t=torch.full(
+                (xt.shape[0],), t_index, device=self.device,
+                dtype=torch.long),
+            t_index=t_index,
+            deterministic=deterministic)
 
     def _compute_prior_kl_divergence(self, x0, batch_size):
         transformation_matrices = self._get_effective_transform_matrices(
@@ -228,7 +258,7 @@ class Blurring(GaussianDiffusion):
         elif self.loss_type == 'soft_diffusion':
             transformation_matrices = self._get_effective_transform_matrices(
                 x0, t, mask=0)
-        transformation_matrices = transformation_matrices.detach()
+
         target = torch.bmm(
             transformation_matrices,
             (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))

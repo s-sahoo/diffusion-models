@@ -39,6 +39,9 @@ def make_parser():
     train_parser.add_argument('--schedule', default='cosine',
         choices=['linear', 'cosine'], 
         help='constants scheduler for the diffusion model.')
+    train_parser.add_argument('--sampler', default='naive',
+        choices=['naive', 'momentum'], 
+        help='Sampler type during the inference phase.')
     train_parser.add_argument('--loss_type', default='elbo',
         choices=['elbo', 'soft_diffusion'], 
         help='loss functions used in diffusion models.')
@@ -84,11 +87,18 @@ def make_parser():
     eval_parser = subparsers.add_parser('eval')
     eval_parser.set_defaults(func=eval)
 
+    eval_parser.add_argument('--schedule', default='cosine',
+        choices=['linear', 'cosine'], 
+        help='constants scheduler for the diffusion model.')
     eval_parser.add_argument('--model', default='gaussian',
-        choices=['gaussian', 'infomax', 'learned', 'learned_input_time'], 
+        choices=['gaussian', 'infomax', 'blur', 'learned', 'learned_input_time'], 
         help='type of ddpm model to run')
-    eval_parser.add_argument('--dataset', default='fashion-mnist',
-        choices=['fashion-mnist', 'mnist'], help='training dataset')
+    eval_parser.add_argument('--dataset', default='fmnist',
+        choices=['fmnist', 'mnist'], help='training dataset')
+    eval_parser.add_argument('--timesteps', type=int, default=200,
+        help='total number of timesteps in the diffusion model')
+    eval_parser.add_argument('--batch-size', type=int, default=128,
+        help='training batch size')
     eval_parser.add_argument('--checkpoint', required=True,
         help='path to training checkpoint')
     eval_parser.add_argument('--deterministic', action='store_true', 
@@ -103,7 +113,30 @@ def make_parser():
         help='folder where output will be stored')
     eval_parser.add_argument('--name', default='test-run',
         help='name of the files that will be saved')
-
+    eval_parser.add_argument('--sampler', default='naive',
+        choices=['naive', 'momentum'], 
+        help='Sampler type during the inference phase.')
+    eval_parser.add_argument('--loss_type', default='elbo',
+        choices=['elbo', 'soft_diffusion'], 
+        help='loss functions used in diffusion models.')
+    # masking parameters
+    eval_parser.add_argument('--fixed_masking', type=bool, default=False,
+        help='Fixed Masking.')
+    eval_parser.add_argument('--margin', type=float, default=0.0,
+        help='margin for the weights.')
+    # blur parameters
+    eval_parser.add_argument('--transform_type', default='blur',
+        choices=['blur', 'learnable_forward'], 
+        help='constants scheduler for the diffusion model.')
+    eval_parser.add_argument('--level_initializer', default='random',
+        choices=['linear', 'zero', 'random'], 
+        help='constants scheduler for the diffusion model.')
+    eval_parser.add_argument('--drop_forward_coef', type=bool, default=False,
+        help='Dont scale image in the forward pass')
+    eval_parser.add_argument('--levels_no_reparam', type=bool, default=False,
+        help='Dont further reparameterize blur variables.')
+    eval_parser.add_argument('--fixed_blur', type=bool, default=False,
+        help='total number of timesteps in the diffusion model')
     return parser
 
 # ----------------------------------------------------------------------------
@@ -125,41 +158,35 @@ def train(args):
         folder=args.folder,
         from_checkpoint=args.checkpoint,
     )
-    # data_loader = get_data_loader(
-    #     config.name, config.batch_size, labels=True)
     trainer.fit(data.get_dataset(args), args.epochs)
 
 
 def eval(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    config = get_config(args)
-    model = get_model(config, device)
-    model.load(args.checkpoint, eval=True)
-    data_loader = get_data_loader(
-        config.name, 128, train=False, labels=True)
+    data.get_dataset_config(args)
+    model = get_model(args, device)
+    model.load(args.checkpoint)
+    model.reverse_model.eval()
 
     if args.sample:
         path = f'{args.folder}/{args.name}-samples.png'
         sample(model, args.sample, path, args.deterministic)
 
-    if args.latents:
-        path = f'{args.folder}/{args.name}-latents.png'
-        viz_latents(model, data_loader, args.latents, path)
-
     scores = {'fid_score': [], 'is_score': []}
     fid_score = metrics.FID()
     inception_score = metrics.InceptionMetric()
-    for batch in data_loader:
+    for batch, _ in data.get_dataset(args):
         real_images = process_images(
-            batch['pixel_values'].to(model.device).detach().cpu().numpy())
-        samples = process_images(
-            model.sample(real_images.shape[0])[-1])
+            batch.to(model.device).detach().cpu().numpy())
+        samples = model.sample(real_images.shape[0])[-1]
+        samples = process_images(samples)
         fid_mean = fid_score.calculate_frechet_distance(
             real_images, samples)
         scores['fid_score'].append(fid_mean)
-        is_mean, _ = inception_score.compute_inception_scores(
-            (255 * samples).type(torch.uint8))
-        scores['is_score'].append(is_mean)
+        break
+        # is_mean, _ = inception_score.compute_inception_scores(
+        #     (255 * samples).type(torch.uint8))
+        # scores['is_score'].append(is_mean)
     print('FID score: {:.2f}'.format(np.mean(scores['fid_score'])))
     print('IS score: {:.2f}'.format(np.mean(scores['is_score'])))
 
@@ -240,8 +267,7 @@ def create_learned(config, device):
     model = UNet(
         channels=config.unet_channels,
         img_shape=img_shape,
-    )
-    model.to(device)
+    ).to(device)
 
     return LearnedGaussianDiffusion(
         noise_model=model,
@@ -299,6 +325,7 @@ def create_blur(config, device):
         level_initializer=args.level_initializer,
         loss_type=args.loss_type,
         transform_type=args.transform_type,
+        sampler=args.sampler,
     )
 
 
