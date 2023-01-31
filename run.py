@@ -13,14 +13,12 @@ from models.unet.colab import Unet as colab_UNet
 from models.unet.biheaded import BiheadedUNet
 from models.modules import feedforward
 from models.unet.auxiliary import AuxiliaryUNet, TimeEmbeddingAuxiliaryUNet
-# from data import get_data_loader
 from diffusion.gaussian import GaussianDiffusion
 from diffusion.auxiliary import InfoMaxDiffusion
 from diffusion.learned import LearnedGaussianDiffusion
 from diffusion.learned_blurring import Blurring
 from diffusion.learned_masking import Masking
 from models.modules.encoders import ConvGaussianEncoder
-# from data.fashion_mnist import FashionMNISTConfig
 from trainer.gaussian import Trainer
 from misc.eval.sample import sample, viz_latents
 
@@ -159,6 +157,7 @@ def find_recent_checkpoint(folder):
 
 def train(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print('Using device:', device)
     data.get_dataset_config(args)
     model = get_model(args, device)
 
