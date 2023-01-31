@@ -1,8 +1,11 @@
 import argparse
 import os
+import pickle
 
+from cleanfid import fid
 import numpy as np
 import torch
+import PIL.Image as Image
 
 import data
 from models.unet.standard import UNet
@@ -18,10 +21,8 @@ from diffusion.learned_blurring import Blurring
 from diffusion.learned_masking import Masking
 from models.modules.encoders import ConvGaussianEncoder
 # from data.fashion_mnist import FashionMNISTConfig
-from trainer.gaussian import Trainer, process_images
+from trainer.gaussian import Trainer
 from misc.eval.sample import sample, viz_latents
-
-from cleanfid import fid
 
 # ----------------------------------------------------------------------------
 
@@ -142,28 +143,55 @@ def make_parser():
 
 # ----------------------------------------------------------------------------
 
+def find_recent_checkpoint(folder):
+    max_checkpoint_epoch = -1
+    checkpoint = None
+    for i in os.listdir(folder):
+        if 'pth' in i:
+            max_checkpoint_epoch = max(
+                max_checkpoint_epoch,
+                int(i.split('-')[-1][:-4]))
+            checkpoint = os.path.join(
+                folder,
+                f'model-{max_checkpoint_epoch}.pth')
+    return checkpoint, max_checkpoint_epoch + 1
+
+
 def train(args):
-    if not os.path.exists(args.folder):
-        os.makedirs(args.folder)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     data.get_dataset_config(args)
     model = get_model(args, device)
 
-    if args.checkpoint:
-        model.load(args.checkpoint)
+    # Checkpoints
+    checkpoint = args.checkpoint
+    skip_epochs = 0
+    metrics = None
+    if not os.path.exists(args.folder):
+        os.makedirs(args.folder)
+    else:
+        checkpoint, skip_epochs = find_recent_checkpoint(args.folder)
+        if checkpoint is None:
+            print(f'No checkpoints found in {args.folder}')
+        metrics_file = f'{args.folder}/metrics.pkl'
+        if os.path.exists(metrics_file):
+            with open(metrics_file, 'rb') as f:
+                metrics = pickle.load(f)
+
     trainer = Trainer(
         model,
         weighted_time_sample=args.weighted_time_sample,
         lr=args.learning_rate,
         optimizer=args.optimizer,
         folder=args.folder,
-        from_checkpoint=args.checkpoint,
+        from_checkpoint=checkpoint,
+        skip_epochs=skip_epochs,
+        metrics=metrics,
     )
     trainer.fit(data.get_dataset(args), args.epochs)
 
 
 def eval(args):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     data.get_dataset_config(args)
     model = get_model(args, device)
     model.load(args.checkpoint)
@@ -174,21 +202,10 @@ def eval(args):
         sample(model, args.sample, path, args.deterministic)
 
     scores = {'fid_score': [], 'is_score': []}
-    def generate_images(z):
-        samples = model.sample(
-            x=z.view(args.batch_size, args.input_channels,
-                     args.input_size, args.input_size),
-            batch_size=args.batch_size)
-        return process_images(samples[-1], return_type='uint')
-    fid_mean = fid.compute_fid(
-        gen=generate_images,
-        dataset_name='fmnist',
-        dataset_res=args.input_size,
+    fid_score = model.compute_fid_scores(
         batch_size=args.batch_size,
-        num_gen=1280,
-        dataset_split='custom',
-        z_dim=args.input_channels * args.input_size ** 2)
-    print(f'FID score: {fid_mean}')
+        num_samples=10000)
+    print('FID score: {:.2f}'.format(fid_score))
 
 # ----------------------------------------------------------------------------
 

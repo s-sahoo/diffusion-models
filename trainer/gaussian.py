@@ -1,5 +1,8 @@
 """Implements the core diffusion algorithms."""
+import pickle
 import collections
+
+from cleanfid import fid
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -10,33 +13,12 @@ from torchvision.utils import save_image
 from torchmetrics.image.inception import InceptionScore
 import PIL.Image as Image
 
-from cleanfid import fid
-
-
-def process_images(images, return_type='float'):
-    processed_images = []
-    for image in images:
-        #TODO: This is for fashion mnist.
-        image = 255 * np.clip((image + 1) * 0.5, 0, 1)
-        if image.shape[0] == 1:
-          image = np.array([image[0]] * 3)
-        image = np.transpose(image, (1, 2, 0)).astype(np.uint8)
-        pil_img = torchvision.transforms.ToPILImage()(image)
-        resized_img = pil_img.resize((299,299), Image.BILINEAR)
-        processed_images.append(np.transpose(np.array(resized_img),
-                                             (2, 0, 1)))
-    processed_images = np.array(processed_images)
-    if return_type == 'uint':
-        return torch.tensor(processed_images, dtype=torch.uint8)
-    elif return_type == 'float':
-        return torch.tensor(processed_images, dtype=torch.float) / 255.0   
-
 
 class Trainer():
     def __init__(
         self, diffusion_model, lr=1e-3, optimizer='adam', 
         folder='.', n_samples=36, from_checkpoint=None,
-        weighted_time_sample=False):
+        weighted_time_sample=False, skip_epochs=0, metrics=None):
         self.model = diffusion_model
         if optimizer=='adam':
             optimizer = Adam(self.model.parameters(), lr=lr)
@@ -45,23 +27,25 @@ class Trainer():
         self.optimizer = optimizer
         self.folder = folder
         self.n_samples = n_samples
-        self.inception_score = metrics.InceptionMetric()
-        self.fid_score = metrics.FID()
         self.weighted_time_sample = weighted_time_sample
         if self.weighted_time_sample:
             print('Using weighted time samples.')
             self.time_weights = 1 / (
                 0.1  + self.model.sqrt_one_minus_bar_alphas ** 2)
-            self.loss_weights=self.time_weights.sum()
+            self.loss_weights = self.time_weights.sum()
         else:
             self.loss_weights = 1.0
             print('Using uniform time sampling.')
-        self.metrics = collections.defaultdict(list)
+        if metrics is None:
+            self.metrics = collections.defaultdict(list)
+        else:
+            self.metrics = metrics
+        self.skip_epochs = skip_epochs
         if from_checkpoint is not None:
             self.load_model(from_checkpoint)
 
     def fit(self, data_loader, epochs):
-        for epoch in range(epochs):
+        for epoch in range(self.skip_epochs, epochs, 1):
             metrics_per_epoch = collections.defaultdict(list)
             for step, (batch, _) in enumerate(data_loader):
                 self.optimizer.zero_grad()
@@ -99,6 +83,8 @@ class Trainer():
             self.write_metrics()
 
     def write_metrics(self):
+        with open(f'{self.folder}/metrics.pkl', 'wb') as f:
+            pickle.dump(self.metrics, f, protocol=pickle.HIGHEST_PROTOCOL)
         for key, values in self.metrics.items():
             with open(f'{self.folder}/{key}.txt', 'w') as f:
                 for value in values:
@@ -109,22 +95,11 @@ class Trainer():
             self.metrics[key].append(f'{epoch} {np.mean(value)}\n')
 
     def compute_fid_scores(self, batch_size, epoch):
-        def generate_images(z):
-            samples = model.sample(
-                x=z.view(batch_size, self.model.img_channels,
-                         self.model.img_dim, self.model.img_dim),
-                batch_size=batch_size)
-            return process_images(samples[-1], return_type='uint')
-        fid_mean = fid.compute_fid(
-            gen=generate_images,
-            dataset_name='fmnist',
-            dataset_res=self.model.img_dim,
+        score = self.model.compute_fid_scores(
             batch_size=batch_size,
-            num_gen=batch_size,
-            dataset_split='custom',
-            z_dim=self.model.img_channels * self.model.img_dim ** 2)
-        self.metrics['fid_score'].append(f'{epoch} {fid_mean}\n')
-        print('FID score: {:.2f}'.format(fid_mean))
+            num_samples=10 * batch_size)
+        self.metrics['fid_score'].append(f'{epoch} {score}\n')
+        print('FID score: {:.2f}'.format(score))
 
     def save_images(self, epoch, step):
         samples = torch.Tensor(self.model.sample(self.n_samples)[-1])

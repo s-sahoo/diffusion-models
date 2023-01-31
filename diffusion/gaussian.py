@@ -1,10 +1,24 @@
 """Implements the core diffusion algorithms."""
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.optim import Adam
 from torchvision.utils import save_image
 from .schedule import get_schedule, get_by_idx
+from cleanfid import fid
+
+def process_images(images, return_type='float'):
+    if images.shape[1] == 1:
+        # This is for fashion mnist.
+        images = 255 * np.clip((images + 1) * 0.5, 0, 1)
+        images = images.astype(np.uint8)
+        images = np.tile(images, (1, 3, 1, 1))
+    if return_type == 'uint':
+        return torch.tensor(images, dtype=torch.uint8)
+    elif return_type == 'float':
+        return torch.tensor(images, dtype=torch.float) / 255.0   
+
 
 class GaussianDiffusion(nn.Module):
     """Implements the core learning and inference algorithms."""
@@ -104,6 +118,22 @@ class GaussianDiffusion(nn.Module):
             x = self.p_sample(x, t, deterministic=(t==0 or deterministic))
             xs.append(x.cpu().numpy())
         return xs
+
+    def compute_fid_scores(self, batch_size, num_samples):
+        def generate_images(z):
+            samples = self.sample(
+                x=z.view(batch_size, self.img_channels,
+                         self.img_dim, self.img_dim),
+                batch_size=batch_size)
+            return process_images(samples[-1], return_type='uint')
+        return fid.compute_fid(
+            gen=generate_images,
+            dataset_name='fmnist',
+            dataset_res=self.img_dim,
+            batch_size=batch_size,
+            num_gen=num_samples,
+            dataset_split='custom',
+            z_dim=self.img_channels * self.img_dim ** 2)
 
     def p_loss_at_step_t(self, noise, predicted_noise, loss_type="l1"):
         if loss_type == 'l1':
