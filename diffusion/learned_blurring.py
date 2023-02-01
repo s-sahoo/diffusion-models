@@ -88,6 +88,14 @@ class Blurring(GaussianDiffusion):
                           device=self.device))
             self.eigen_values = torch.nn.Parameter(
                 torch.ones(self.img_dim ** 2, device=self.device))
+        elif self.transform_type == 'identity':
+            print('Transform: identity')
+            self.eigen_vectors = torch.eye(
+                self.img_dim ** 2,
+                dtype=torch.float32,
+                device=self.device)
+            self.eigen_values = torch.ones(
+                self.img_dim ** 2, device=self.device)
         self.levels = torch.nn.Parameter(
             self._initialize_levels(level_initializer))
         self.identity = torch.eye(
@@ -108,7 +116,7 @@ class Blurring(GaussianDiffusion):
 
     def _construct_transform_matrix(self, eigenvalues):
         batch_size = eigenvalues.shape[0]
-        if self.transform_type == 'blur':
+        if self.transform_type in ['blur', 'identity']:
             eigen_vectors = self.eigen_vectors
         else:
             eigen_vectors = self.eigen_vectors.weight

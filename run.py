@@ -70,7 +70,7 @@ def make_parser():
         help='margin for the weights.')
     # blur parameters
     train_parser.add_argument('--transform_type', default='blur',
-        choices=['blur', 'learnable_forward'], 
+        choices=['blur', 'learnable_forward', 'identity'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--level_initializer', default='random',
         choices=['linear', 'zero', 'random'], 
@@ -133,9 +133,6 @@ def train(args):
     print('Using device:', device)
     data.get_dataset_config(args)
     model = get_model(args, device)
-    with open(f'{args.folder}/args.pkl', 'wb') as f:
-        args.func = None
-        pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Checkpoints
     checkpoint = args.checkpoint
@@ -151,6 +148,9 @@ def train(args):
         if os.path.exists(metrics_file):
             with open(metrics_file, 'rb') as f:
                 metrics = pickle.load(f)
+    with open(f'{args.folder}/args.pkl', 'wb') as f:
+        args.func = None
+        pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     trainer = Trainer(
         model,
