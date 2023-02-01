@@ -77,7 +77,7 @@ class Trainer():
                 self.optimizer.step()
             # save generated images
             self.save_images(epoch, step)
-            if epoch % 10 == 9:
+            if epoch % 5 == 4:
                 self.compute_fid_scores(batch_size, epoch)
             self.record_metrics(epoch, metrics_per_epoch)
             self.save_model(epoch)
