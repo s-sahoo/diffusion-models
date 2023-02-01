@@ -87,56 +87,14 @@ def make_parser():
     eval_parser = subparsers.add_parser('eval')
     eval_parser.set_defaults(func=eval)
 
-    eval_parser.add_argument('--schedule', default='cosine',
-        choices=['linear', 'cosine'], 
-        help='constants scheduler for the diffusion model.')
-    eval_parser.add_argument('--model', default='gaussian',
-        choices=['gaussian', 'infomax', 'blur', 'learned', 'learned_input_time'], 
-        help='type of ddpm model to run')
-    eval_parser.add_argument('--dataset', default='fmnist',
-        choices=['fmnist', 'mnist'], help='training dataset')
-    eval_parser.add_argument('--timesteps', type=int, default=200,
-        help='total number of timesteps in the diffusion model')
-    eval_parser.add_argument('--batch-size', type=int, default=128,
-        help='training batch size')
-    eval_parser.add_argument('--checkpoint', required=True,
-        help='path to training checkpoint')
-    eval_parser.add_argument('--deterministic', action='store_true', 
-        default=False, help='run in deterministic mode')
-    eval_parser.add_argument('--sample', type=int, default=None,
-        help='how many samples to draw')
-    eval_parser.add_argument('--interpolate', type=int, default=None,
-        help='how many samples to interpolate')
-    eval_parser.add_argument('--latents', type=int, default=None,
-        help='how many points to visualize in latent space')
     eval_parser.add_argument('--folder', default='.',
-        help='folder where output will be stored')
-    eval_parser.add_argument('--name', default='test-run',
-        help='name of the files that will be saved')
+        help='folder to evaluate.')
     eval_parser.add_argument('--sampler', default='naive',
         choices=['naive', 'momentum'], 
         help='Sampler type during the inference phase.')
-    eval_parser.add_argument('--loss_type', default='elbo',
-        choices=['elbo', 'soft_diffusion'], 
-        help='loss functions used in diffusion models.')
-    # masking parameters
-    eval_parser.add_argument('--fixed_masking', type=bool, default=False,
-        help='Fixed Masking.')
-    eval_parser.add_argument('--margin', type=float, default=0.0,
-        help='margin for the weights.')
-    # blur parameters
-    eval_parser.add_argument('--transform_type', default='blur',
-        choices=['blur', 'learnable_forward'], 
-        help='constants scheduler for the diffusion model.')
-    eval_parser.add_argument('--level_initializer', default='random',
-        choices=['linear', 'zero', 'random'], 
-        help='constants scheduler for the diffusion model.')
-    eval_parser.add_argument('--drop_forward_coef', type=bool, default=False,
-        help='Dont scale image in the forward pass')
-    eval_parser.add_argument('--levels_no_reparam', type=bool, default=False,
-        help='Dont further reparameterize blur variables.')
-    eval_parser.add_argument('--fixed_blur', type=bool, default=False,
-        help='total number of timesteps in the diffusion model')
+    eval_parser.add_argument('--model_selection', default='fid_score',
+        choices=['fid_score', 'last', 'total_loss'], 
+        help='pick the best model.')
     return parser
 
 # ----------------------------------------------------------------------------
@@ -155,11 +113,29 @@ def find_recent_checkpoint(folder):
     return checkpoint, max_checkpoint_epoch + 1
 
 
+def find_checkpoint(folder, metric):
+    if metric == 'last':
+        checkpoint, _ = find_recent_checkpoint(folder)
+        return checkpoint
+    best_score = np.float('inf')
+    best_epoch = None
+    with open(f'{folder}/{metric}.txt', 'r') as f:
+        for line in f.readlines():
+            epoch, score = line.strip().split()
+            if float(score) < best_score:
+                best_score = float(score)
+                best_epoch = int(epoch)
+    return os.path.join(folder, f'model-{best_epoch}.pth')
+
+
 def train(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using device:', device)
     data.get_dataset_config(args)
     model = get_model(args, device)
+    with open(f'{args.folder}/args.pkl', 'wb') as f:
+        args.func = None
+        pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Checkpoints
     checkpoint = args.checkpoint
@@ -189,40 +165,49 @@ def train(args):
     trainer.fit(data.get_dataset(args), args.epochs)
 
 
-def eval(args):
+def eval(cmd_args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    with open(f'{cmd_args.folder}/args.pkl', 'rb') as f:
+        args = pickle.load(f)
+    args.sampler = cmd_args.sampler
     data.get_dataset_config(args)
+    # print(args, args.model)
     model = get_model(args, device)
-    model.load(args.checkpoint)
+    checkpoint = find_checkpoint(cmd_args.folder, cmd_args.model_selection)
+    model.load(checkpoint)
     model.reverse_model.eval()
-
-    if args.sample:
-        path = f'{args.folder}/{args.name}-samples.png'
-        sample(model, args.sample, path, args.deterministic)
+    
+    eval_name = f'{cmd_args.sampler}-{cmd_args.model_selection}'
+    sample(model,
+           36,
+           '{}/eval-{}-samples.png'.format(args.folder, eval_name),
+           False)
 
     scores = {'fid_score': [], 'is_score': []}
     fid_score = model.compute_fid_scores(
         batch_size=args.batch_size,
         num_samples=10000)
+    with open('{}/eval-{}-fid.txt'.format(args.folder, eval_name), 'w') as f:
+        f.write(str(fid_score))
     print('FID score: {:.2f}'.format(fid_score))
 
 # ----------------------------------------------------------------------------
 
 def get_model(config, device):
-    if args.model == 'gaussian':
+    if config.model == 'gaussian':
         model = create_gaussian(config, device)
-    elif args.model == 'infomax':
+    elif config.model == 'infomax':
         model = create_infomax(config, device)
-    elif args.model == 'blur':
+    elif config.model == 'blur':
         model = create_blur(config, device)
-    elif args.model == 'learned':
+    elif config.model == 'learned':
         model = create_learned(config, device)
-    elif args.model == 'learned_input_time':
+    elif config.model == 'learned_input_time':
         model = create_learned_input_time(config, device, args.reparam)
-    elif args.model == 'masking':
+    elif config.model == 'masking':
         model = create_masked(config, device)
     else:
-        raise ValueError(args.model)
+        raise ValueError(config.model)
     return model
 
 def create_gaussian(config, device):
@@ -311,13 +296,13 @@ def create_masked(config, device):
     )
 
 
-def create_blur(config, device):
-    img_shape = (config.input_channels,
-                 config.input_size,
-                 config.input_size)
+def create_blur(args, device):
+    img_shape = (args.input_channels,
+                 args.input_size,
+                 args.input_size)
     
     reverse_model = UNet(
-        channels=config.unet_channels,
+        channels=args.unet_channels,
         img_shape=img_shape,
     ).to(device)
 
@@ -328,7 +313,7 @@ def create_blur(config, device):
         fixed_blur=args.fixed_blur,
         schedule=args.schedule,
         img_shape=img_shape,
-        timesteps=config.timesteps,
+        timesteps=args.timesteps,
         device=device,
         drop_forward_coef=args.drop_forward_coef,
         levels_no_reparam=args.levels_no_reparam,
