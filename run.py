@@ -171,7 +171,7 @@ def eval(cmd_args):
         args = pickle.load(f)
     args.sampler = cmd_args.sampler
     data.get_dataset_config(args)
-    # print(args, args.model)
+
     model = get_model(args, device)
     checkpoint = find_checkpoint(cmd_args.folder, cmd_args.model_selection)
     model.load(checkpoint)
