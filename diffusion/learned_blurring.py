@@ -96,21 +96,32 @@ class Blurring(GaussianDiffusion):
                 device=self.device)
             self.eigen_values = torch.ones(
                 self.img_dim ** 2, device=self.device)
-        self.levels = torch.nn.Parameter(
-            self._initialize_levels(level_initializer))
+        self.level_initializer = level_initializer
+        if self.level_initializer == 'sigmoid':
+            # w * sigmoid(a * (t / T) + b)
+            # blur params are initialized between [0.2, 9.8].
+            self.w = torch.nn.Parameter(
+                10 * torch.ones(1, device=self.device))
+            self.a = torch.nn.Parameter(
+                8 * torch.ones(1, device=self.device))
+            self.b = torch.nn.Parameter(
+                -4 * torch.ones(1, device=self.device))
+        else:
+            # blur_levels = torch.nn.functional.softplus(self.levels)
+            self.levels = torch.nn.Parameter(self._initialize_levels())
         self.identity = torch.eye(
             self.img_dim ** 2,
             dtype=torch.float32,
             device=self.device)[None, :, :]
 
     def _initialize_levels(self, level_initializer):
-        if level_initializer == 'random':
+        if self.level_initializer == 'random':
             return torch.rand(self.timesteps, device=self.device)
-        elif level_initializer == 'zero':
+        elif self.level_initializer == 'zero':
             # softplus of -3 is close to 0.
             return -3 * torch.ones(
                 self.timesteps, device=self.device)
-        elif level_initializer == 'linear':
+        elif self.level_initializer == 'linear':
             return torch.arange(
                 start=0, end=self.timesteps, device=self.device)
 
@@ -144,6 +155,11 @@ class Blurring(GaussianDiffusion):
         return xs
 
     def _get_levels(self, time):
+        if self.level_initializer == 'sigmoid':
+            # w * sigmoid(a * (t / T) + b)
+            blur_levels = self.w * torch.sigmoid(
+                self.a * (t / self.timesteps) + self.b)
+            return blur_levels[:, None]
         blur_levels = torch.nn.functional.softplus(self.levels)
         if not self.levels_no_reparam:
             blur_levels = torch.cumsum(blur_levels, dim=0)

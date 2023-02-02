@@ -72,11 +72,11 @@ def make_parser():
     train_parser.add_argument('--transform_type', default='blur',
         choices=['blur', 'learnable_forward', 'identity'], 
         help='constants scheduler for the diffusion model.')
-    train_parser.add_argument('--level_initializer', default='random',
-        choices=['linear', 'zero', 'random'], 
-        help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
         help='Dont scale image in the forward pass')
+    train_parser.add_argument('--level_initializer', default='random',
+        choices=['linear', 'zero', 'random', 'sigmoid'], 
+        help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--levels_no_reparam', type=bool, default=False,
         help='Dont further reparameterize blur variables.')
     train_parser.add_argument('--fixed_blur', type=bool, default=False,
