@@ -115,7 +115,7 @@ class Blurring(GaussianDiffusion):
             dtype=torch.float32,
             device=self.device)[None, :, :]
 
-    def _initialize_levels(self, level_initializer):
+    def _initialize_levels(self):
         if self.level_initializer == 'random':
             return torch.rand(self.timesteps, device=self.device)
         elif self.level_initializer == 'zero':
