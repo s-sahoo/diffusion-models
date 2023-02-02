@@ -98,6 +98,7 @@ class Blurring(GaussianDiffusion):
                 self.img_dim ** 2, device=self.device)
         self.level_initializer = level_initializer
         if self.level_initializer == 'sigmoid':
+            print('Using sigmoid blur levels.')
             # w * sigmoid(a * (t / T) + b)
             # blur params are initialized between [0.2, 9.8].
             self.w = torch.nn.Parameter(
@@ -158,7 +159,7 @@ class Blurring(GaussianDiffusion):
         if self.level_initializer == 'sigmoid':
             # w * sigmoid(a * (t / T) + b)
             blur_levels = self.w * torch.sigmoid(
-                self.a * (t / self.timesteps) + self.b)
+                self.a * (time / self.timesteps) + self.b)
             return blur_levels[:, None]
         blur_levels = torch.nn.functional.softplus(self.levels)
         if not self.levels_no_reparam:
