@@ -50,7 +50,7 @@ class Blurring(GaussianDiffusion):
         self, noise_model, forward_matrix, reverse_model, timesteps,
         img_shape, level_initializer, fixed_blur=False, schedule='cosine',
         device='cpu', drop_forward_coef=False, levels_no_reparam=False,
-        loss_type='elbo', transform_type='blur', sampler='naive', detach_loss=False):
+        loss_type='elbo', transform_type='blur', sampler='naive', ub_loss=False):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
         self.loss_type = loss_type
@@ -62,8 +62,8 @@ class Blurring(GaussianDiffusion):
         self.sampler = sampler
         self.transform_type = transform_type
         self.fixed_blur = fixed_blur
-        self.detach_loss = detach_loss
-        if self.detach_loss:
+        self.ub_loss = ub_loss
+        if self.ub_loss:
             print('Detaching blur matrix from the loss.')
         if self.transform_type == 'blur':
             self.base_blur_matrix = torch.tensor(
@@ -284,15 +284,17 @@ class Blurring(GaussianDiffusion):
             transformation_matrices = self._get_effective_transform_matrices(
                 x0, t, mask=0)
 
-        if self.detach_loss:
-            transformation_matrices = transformation_matrices.detach()
-
-        target = torch.bmm(
-            transformation_matrices,
-            (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))
-        prediction = torch.bmm(
-            transformation_matrices,
-            self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
+        if self.ub_loss:
+            target = (x0 - x_t).view(batch_size, self.img_dim ** 2, 1)
+            prediction = self.reverse_model(x_t, t).view(
+                batch_size, self.img_dim ** 2, 1)
+        else:
+            target = torch.bmm(
+                transformation_matrices,
+                (x0 - x_t).view(batch_size, self.img_dim ** 2, 1))
+            prediction = torch.bmm(
+                transformation_matrices,
+                self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
         reconstruction_loss = self.p_loss_at_step_t(target, prediction, 'l2')
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
         total_loss = reconstruction_loss + kl_divergence / self.timesteps

@@ -81,8 +81,8 @@ def make_parser():
         help='Dont further reparameterize blur variables.')
     train_parser.add_argument('--fixed_blur', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
-    train_parser.add_argument('--detach_loss', type=bool, default=False,
-        help='detach the blur matrix from the loss.')
+    train_parser.add_argument('--ub_loss', type=bool, default=False,
+        help='Drop the blur matrix from the loss.')
     
     # eval
 
@@ -323,7 +323,7 @@ def create_blur(args, device):
         loss_type=args.loss_type,
         transform_type=args.transform_type,
         sampler=args.sampler,
-        detach_loss=args.detach_loss,
+        ub_loss=args.ub_loss,
     )
 
 
