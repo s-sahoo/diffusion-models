@@ -50,7 +50,8 @@ class Blurring(GaussianDiffusion):
         self, noise_model, forward_matrix, reverse_model, timesteps,
         img_shape, level_initializer, fixed_blur=False, schedule='cosine',
         device='cpu', drop_forward_coef=False, levels_no_reparam=False,
-        loss_type='elbo', transform_type='blur', sampler='naive', ub_loss=False):
+        loss_type='elbo', transform_type='blur', sampler='naive', ub_loss=False,
+        detach_matrix=False):
         super().__init__(
             noise_model, timesteps, img_shape, schedule, device)
         self.loss_type = loss_type
@@ -63,8 +64,9 @@ class Blurring(GaussianDiffusion):
         self.transform_type = transform_type
         self.fixed_blur = fixed_blur
         self.ub_loss = ub_loss
-        if self.ub_loss:
-            print('Detaching blur matrix from the loss.')
+        self.detach_matrix = detach_matrix
+        print('Detaching blur matrix from the loss:', self.detach_matrix)
+        print('UB loss:', self.ub_loss)
         if self.transform_type == 'blur':
             self.base_blur_matrix = torch.tensor(
                 conv_to_dense(
@@ -283,6 +285,9 @@ class Blurring(GaussianDiffusion):
         elif self.loss_type == 'soft_diffusion':
             transformation_matrices = self._get_effective_transform_matrices(
                 x0, t, mask=0)
+        
+        if self.detach_matrix:
+            transformation_matrices = transformation_matrices.detach()
 
         if self.ub_loss:
             target = (x0 - x_t).view(batch_size, self.img_dim ** 2, 1)
