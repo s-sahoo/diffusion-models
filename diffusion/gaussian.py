@@ -30,35 +30,41 @@ class GaussianDiffusion(nn.Module):
         self.timesteps = timesteps
         self.img_dim = img_shape[1]
         self.img_channels = img_shape[0]
-        self.schedule = get_schedule(schedule)
         self.device=device
+        self.schedule = schedule
+        self.ddpm_schedules = {'linear', 'cosine', 'quadratic', 'sigmoid'}
+        if self.schedule in self.ddpm_schedules:
+            self.scheduler = get_schedule(schedule)
 
-        # initialize the alpha and beta paramters
-        self.betas = self.schedule(timesteps)
-        self.alphas = 1 - self.betas
+            # initialize the alpha and beta paramters
+            self.betas = self.scheduler(timesteps)
+            self.alphas = 1 - self.betas
 
-        # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.bar_alphas = torch.cumprod(self.alphas, axis=0)
-        self.sqrt_bar_alphas = torch.sqrt(self.bar_alphas)
-        self.sqrt_one_minus_bar_alphas = torch.sqrt(1. - self.bar_alphas)
+            # calculations for diffusion q(x_t | x_{t-1}) and others
+            self.bar_alphas = torch.cumprod(self.alphas, axis=0)
+            self.sqrt_bar_alphas = torch.sqrt(self.bar_alphas)
+            self.sqrt_one_minus_bar_alphas = torch.sqrt(1. - self.bar_alphas)
 
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
-        self.bar_alphas_prev = F.pad(self.bar_alphas[:-1], (1, 0), value=1.0)
-        self.posterior_variance = (
-            self.betas * (1. - self.bar_alphas_prev) / (1. - self.bar_alphas)
-        )
+            # calculations for posterior q(x_{t-1} | x_t, x_0)
+            self.bar_alphas_prev = F.pad(self.bar_alphas[:-1], (1, 0), value=1.0)
+            self.posterior_variance = (
+                self.betas * (1. - self.bar_alphas_prev) / (1. - self.bar_alphas)
+            )
+
+    def _get_noise_sigma(self):
+        return self.sqrt_one_minus_bar_alphas
+
+    def _get_x0_coefficient(self):
+        if self.drop_forward_coef:
+            return torch.ones(self.timesteps, device=self.device)
+        return self.sqrt_bar_alphas
 
     def _add_noise(self, x0, t, noise):
-        if self.drop_forward_coef:
-            x0_coefficient = 1
-        else:
-            x0_coefficient = get_by_idx(
-                self.sqrt_bar_alphas, t, x0.shape)
-        sqrt_one_minus_bar_alphas_t = get_by_idx(
-            self.sqrt_one_minus_bar_alphas, t, x0.shape
-        )
+        x0_coefficient = get_by_idx(
+                self._get_x0_coefficient(), t, x0.shape)
+        noise_sigma = get_by_idx(self._get_noise_sigma(), t, x0.shape)
         return (x0_coefficient * x0 
-                + sqrt_one_minus_bar_alphas_t * noise)
+                + noise_sigma * noise)
 
     def q_sample(self, x0, t, noise=None):
         """Samples from the forward diffusion process q.

@@ -67,6 +67,8 @@ class Blurring(GaussianDiffusion):
         self.detach_matrix = detach_matrix
         print('Detaching blur matrix from the loss:', self.detach_matrix)
         print('UB loss:', self.ub_loss)
+        if self.schedule == 'new_linear':
+            self.gammas = torch.arange(self.timesteps, 0, -1) / self.timesteps
         if self.transform_type == 'blur':
             self.base_blur_matrix = torch.tensor(
                 conv_to_dense(
@@ -119,6 +121,15 @@ class Blurring(GaussianDiffusion):
             self.img_dim ** 2,
             dtype=torch.float32,
             device=self.device)[None, :, :]
+
+    def _get_noise_sigma(self):
+        self.schedule == 'new_linear':
+            return torch.sqrt(1 - self.gammas)
+
+    def _get_x0_coefficient(self):
+        if self.drop_forward_coef:
+            return torch.ones(self.timesteps, device=self.device)
+        return self.sqrt_bar_alphas
 
     def _initialize_levels(self):
         if self.level_initializer == 'random':
