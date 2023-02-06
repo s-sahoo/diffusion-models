@@ -137,7 +137,10 @@ class Blurring(GaussianDiffusion):
         if self.schedule == 'new_linear':
             gammas = self._linear_schedule()
         elif self.schedule == 'new_cosine_1':
-            gammas = self._cosine_schedule(start=0, end=1, tau=1)
+            gammas = self._cosine_schedule(
+                start=torch.tensor(0, device=self.device),
+                end=1,
+                tau=1)
         elif self.schedule == 'new_cosine_2':
             gammas = self._cosine_schedule(start=0.2, end=1, tau=1)
         elif self.schedule == 'new_cosine_3':

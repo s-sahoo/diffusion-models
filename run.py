@@ -37,7 +37,8 @@ def make_parser():
         choices=['gaussian', 'infomax', 'blur', 'masking', 'learned'], 
         help='type of ddpm model to run')
     train_parser.add_argument('--schedule', default='cosine',
-        choices=['linear', 'cosine', 'new_cos', 'new_linear'], 
+        choices=['linear', 'cosine', 'new_linear', 'new_cosine_1',
+                 'new_cosine_2', 'new_cosine_3', 'new_cosine_4'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--sampler', default='naive',
         choices=['naive', 'momentum'], 
