@@ -18,7 +18,7 @@ class Trainer():
     def __init__(
         self, diffusion_model, lr=1e-3, optimizer='adam', 
         folder='.', n_samples=36, from_checkpoint=None,
-        weighted_time_sample=False, skip_epochs=0, metrics=None):
+        loss_coefficients=False, skip_epochs=0, metrics=None):
         self.model = diffusion_model
         if optimizer=='adam':
             optimizer = Adam(self.model.parameters(), lr=lr)
@@ -27,15 +27,8 @@ class Trainer():
         self.optimizer = optimizer
         self.folder = folder
         self.n_samples = n_samples
-        self.weighted_time_sample = weighted_time_sample
-        if self.weighted_time_sample:
-            print('Using weighted time samples.')
-            self.time_weights = 1 / (
-                0.1  + self.model.sqrt_one_minus_bar_alphas ** 2)
-            self.loss_weights = self.time_weights.sum()
-        else:
-            self.loss_weights = 1.0
-            print('Using uniform time sampling.')
+        self.loss_coefficients = loss_coefficients
+        print('Using weighted time samples:', self.loss_coefficients)
         if metrics is None:
             self.metrics = collections.defaultdict(list)
         else:
@@ -53,18 +46,24 @@ class Trainer():
                 batch = batch.to(self.model.device)
 
                 # Algorithm 1 line 3: sample t uniformally for every example in the batch
-                if self.weighted_time_sample:
+                time_weights = 1 / (
+                    0.1  + self.model._get_noise_sigma().detach() ** 2)
+                loss_weights = time_weights.sum()
+                if self.loss_coefficients == 'sample':
                     t = torch.multinomial(
-                        self.time_weights, batch_size,
+                        time_weights, batch_size,
                         replacement=True).long().to(self.model.device)
                 else:
                     t = torch.randint(
                         0, self.model.timesteps, (batch_size,),
                         device=self.model.device).long()
+                    loss_weights = 1.0
+                    if self.loss_coefficients == 'scale':
+                        loss_scale = # TODO
                 loss, metrics = self.model.loss_at_step_t(
                     x0=batch,
                     t=t,
-                    loss_weights=self.loss_weights,
+                    loss_weights=loss_weights,
                     loss_type='l1')
 
                 if step % 100 == 0:

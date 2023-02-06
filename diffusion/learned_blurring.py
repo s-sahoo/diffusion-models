@@ -67,8 +67,8 @@ class Blurring(GaussianDiffusion):
         self.detach_matrix = detach_matrix
         print('Detaching blur matrix from the loss:', self.detach_matrix)
         print('UB loss:', self.ub_loss)
-        if self.schedule == 'new_linear':
-            self.gammas = torch.arange(self.timesteps, 0, -1) / self.timesteps
+        if self.schedule not in self.ddpm_schedules:
+            self.gammas = self._gamma_scheduler()
         if self.transform_type == 'blur':
             self.base_blur_matrix = torch.tensor(
                 conv_to_dense(
@@ -122,14 +122,41 @@ class Blurring(GaussianDiffusion):
             dtype=torch.float32,
             device=self.device)[None, :, :]
 
+    def _cosine_schedule(self, start, end, tau):
+        v_start = torch.cos(start * torch.pi / 2) ** (2 * tau)
+        v_end = torch.cos(end * torch.pi / 2) ** (2 * tau)
+        t = self._linear_schedule()
+        output = torch.cos((t * (end - start) + start) * torch.pi / 2) ** (2 * tau)
+        return (v_end - output) / (v_end - v_start)
+
+    def _linear_schedule(self):
+        return torch.arange(
+            self.timesteps, 0, -1, device=self.device) / self.timesteps
+
+    def _gamma_scheduler(self):
+        if self.schedule == 'new_linear':
+            gammas = self._linear_schedule()
+        elif self.schedule == 'new_cosine_1':
+            gammas = self._cosine_schedule(start=0, end=1, tau=1)
+        elif self.schedule == 'new_cosine_2':
+            gammas = self._cosine_schedule(start=0.2, end=1, tau=1)
+        elif self.schedule == 'new_cosine_3':
+            gammas = self._cosine_schedule(start=0.2, end=1, tau=2)
+        elif self.schedule == 'new_cosine_4':
+            gammas = self._cosine_schedule(start=0.2, end=1, tau=3)
+        return torch.clip(gammas, 1e-9, 1)
+
     def _get_noise_sigma(self):
-        self.schedule == 'new_linear':
-            return torch.sqrt(1 - self.gammas)
+        if self.schedule in self.ddpm_schedules:
+            return self.sqrt_one_minus_bar_alphas
+        return torch.sqrt(1 - self.gammas)
 
     def _get_x0_coefficient(self):
-        if self.drop_forward_coef:
-            return torch.ones(self.timesteps, device=self.device)
-        return self.sqrt_bar_alphas
+        if self.schedule in self.ddpm_schedules:
+            if self.drop_forward_coef:
+                return torch.ones(self.timesteps, device=self.device)
+            return self.sqrt_bar_alphas
+        return torch.sqrt(self.gammas)
 
     def _initialize_levels(self):
         if self.level_initializer == 'random':
@@ -313,7 +340,7 @@ class Blurring(GaussianDiffusion):
                 self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
         reconstruction_loss = self.p_loss_at_step_t(target, prediction, 'l2')
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
-        total_loss = reconstruction_loss + kl_divergence / self.timesteps
+        total_loss = reconstruction_loss + kl_divergence / (loss_weights * self.timesteps)
 
         return total_loss, {
             'total_loss': total_loss.item(),
