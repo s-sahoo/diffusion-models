@@ -125,37 +125,36 @@ class Blurring(GaussianDiffusion):
     def _cosine_schedule(self, start, end, tau):
         v_start = torch.cos(start * torch.pi / 2) ** (2 * tau)
         v_end = torch.cos(end * torch.pi / 2) ** (2 * tau)
-        t = self._linear_schedule()
+        t = torch.flip(self._linear_schedule(), (0,))
         output = torch.cos((t * (end - start) + start) * torch.pi / 2) ** (2 * tau)
         return (v_end - output) / (v_end - v_start)
 
     def _linear_schedule(self):
-        return torch.arange(
-            self.timesteps, 0, -1, device=self.device) / self.timesteps
+        return torch.arange(self.timesteps - 1, -1, -1) / (self.timesteps - 1)
 
     def _gamma_scheduler(self):
         if self.schedule == 'new_linear':
             gammas = self._linear_schedule()
         elif self.schedule == 'new_cosine_1':
             gammas = self._cosine_schedule(
-                start=torch.tensor(0, device=self.device),
-                end=torch.tensor(1, device=self.device),
-                tau=torch.tensor(1, device=self.device))
+                start=torch.tensor(0.0),
+                end=torch.tensor(1.0),
+                tau=torch.tensor(1.0))
         elif self.schedule == 'new_cosine_2':
             gammas = self._cosine_schedule(
-                start=torch.tensor(0.2, device=self.device),
-                end=torch.tensor(1, device=self.device),
-                tau=torch.tensor(1, device=self.device))
+                start=torch.tensor(0.2),
+                end=torch.tensor(1.0),
+                tau=torch.tensor(1.0))
         elif self.schedule == 'new_cosine_3':
             gammas = self._cosine_schedule(
-                start=torch.tensor(0.2, device=self.device),
-                end=torch.tensor(1, device=self.device),
-                tau=torch.tensor(2, device=self.device))
+                start=torch.tensor(0.2),
+                end=torch.tensor(1.0),
+                tau=torch.tensor(2.0))
         elif self.schedule == 'new_cosine_4':
             gammas = self._cosine_schedule(
-                start=torch.tensor(0.2, device=self.device),
-                end=torch.tensor(1, device=self.device),
-                tau=torch.tensor(3, device=self.device))
+                start=torch.tensor(0.2),
+                end=torch.tensor(1.0),
+                tau=torch.tensor(3.0))
         return torch.clip(gammas, 1e-9, 1)
 
     def _get_noise_sigma(self):
@@ -181,16 +180,16 @@ class Blurring(GaussianDiffusion):
             return torch.arange(
                 start=0, end=self.timesteps, device=self.device)
 
-    def _construct_transform_matrix(self, eigenvalues):
-        batch_size = eigenvalues.shape[0]
+    def _construct_transform_matrix(self, eigen_values):
+        batch_size = eigen_values.shape[0]
         if self.transform_type in ['blur', 'identity']:
             eigen_vectors = self.eigen_vectors
         else:
             eigen_vectors = self.eigen_vectors.weight
             eigen_values = torch.nn.functional.softplus(
                 self.eigen_values)
-        eigenvalues = eigenvalues.view(batch_size, self.img_dim ** 2, 1)
-        return (eigen_vectors @ (eigenvalues * eigen_vectors.t())).view(
+        eigen_values = eigen_values.view(batch_size, self.img_dim ** 2, 1)
+        return (eigen_vectors @ (eigen_values * eigen_vectors.t())).view(
                     batch_size, self.img_dim ** 2, self.img_dim ** 2)
 
     @torch.no_grad()
@@ -321,13 +320,11 @@ class Blurring(GaussianDiffusion):
 
     def _get_effective_transform_matrices(self, x0, t, mask):
         transformation_matrices = self._get_transform_matrices(x0, t)
-        if self.drop_forward_coef:
-            blur_scale = 1
-        else:
-            blur_scale = get_by_idx(
-                self.sqrt_bar_alphas,
-                t * (t >= 0),
-                transformation_matrices.shape)
+        blur_scale = get_by_idx(
+            self._get_x0_coefficient(),
+            t * (t >= 0),
+            transformation_matrices.shape)
+        # print(blur_scale)
         return ((1 - mask) * blur_scale * transformation_matrices
                 + mask * self.identity)
 

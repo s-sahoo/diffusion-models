@@ -2,22 +2,18 @@
 import pickle
 import collections
 
-from cleanfid import fid
 import numpy as np
 import torch
-import torch.nn.functional as F
-from torch import nn
 from torch.optim import Adam
 from torchvision.utils import save_image
-import PIL.Image as Image
 
 
 class Trainer():
     def __init__(
         self, diffusion_model, lr=1e-3, optimizer='adam', 
         folder='.', n_samples=36, from_checkpoint=None,
-        loss_coefficients=False, skip_epochs=0, metrics=None,
-        loss_epsilon=1e-6, loss_type='l2'):
+        loss_coefficients='ignore', skip_epochs=0, metrics=None,
+        loss_epsilon=1e-6, loss_type='elbo', loss='l2'):
         self.model = diffusion_model
         if optimizer=='adam':
             optimizer = Adam(self.model.parameters(), lr=lr)
@@ -29,6 +25,7 @@ class Trainer():
         self.loss_coefficients = loss_coefficients
         self.loss_epsilon = loss_epsilon
         self.loss_type = loss_type
+        self.loss = loss
         print('Using weighted time samples:', self.loss_coefficients)
         if metrics is None:
             self.metrics = collections.defaultdict(list)
@@ -48,6 +45,10 @@ class Trainer():
 
                 loss_coefficients = 1 / (
                     self.loss_epsilon + self.model._get_noise_sigma().detach() ** 2)
+                if self.loss_coefficients == 'scale':
+                    loss_scale = loss_coefficients
+                else:
+                    loss_scale = torch.ones_like(loss_coefficients)
                 if self.loss_coefficients == 'sample':
                     t = torch.multinomial(
                         loss_coefficients, batch_size,
@@ -57,18 +58,13 @@ class Trainer():
                     t = torch.randint(
                         0, self.model.timesteps, (batch_size,),
                         device=self.model.device).long()
-                    if self.loss_coefficients == 'scale':
-                        loss_scale = loss_coefficients
-                    else:
-                        loss_scale = torch.ones_like(
-                            loss_coefficients, device=self.model.device)
                     loss_weights = 1.0
                 loss, metrics = self.model.loss_at_step_t(
                     x0=batch,
                     t=t,
                     loss_weights=loss_weights,
                     loss_scale=loss_scale,
-                    loss_type=self.loss_type)
+                    loss_type=self.loss)
 
                 if step % 100 == 0:
                     print_line = f'{epoch}:{step}: Loss: {loss.item():.4f}'

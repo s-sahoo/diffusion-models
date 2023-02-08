@@ -41,14 +41,12 @@ def make_parser():
                  'new_cosine_2', 'new_cosine_3', 'new_cosine_4'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--sampler', default='naive',
-        choices=['naive', 'momentum'], 
+        choices=['naive', 'naive_clipped', 'momentum'], 
         help='Sampler type during the inference phase.')
     train_parser.add_argument('--loss_type', default='elbo',
         choices=['elbo', 'soft_diffusion'], 
         help='loss functions used in diffusion models.')
     train_parser.add_argument('--timesteps', type=int, default=200,
-        help='total number of timesteps in the diffusion model')
-    train_parser.add_argument('--weighted_time_sample', type=bool, default=False,
         help='total number of timesteps in the diffusion model')
     train_parser.add_argument('--dataset', default='fmnist',
         choices=['fmnist', 'mnist'], help='training dataset')
@@ -63,7 +61,8 @@ def make_parser():
     train_parser.add_argument('--loss-epsilon', type=float, default=1e-6,
         help='loss epsilon')
     train_parser.add_argument('--loss-coefficients', default='ignore',
-        choices=['ignore', 'sample', 'scale'], help='optimization algorithm')        
+        choices=['ignore', 'sample', 'scale'],
+        help='coefficients of the reconstruction loss')        
     train_parser.add_argument('--optimizer', default='adam', choices=['adam'],
         help='optimization algorithm')
     train_parser.add_argument('--loss', default='l2', choices=['l1', 'l2'],
@@ -78,7 +77,7 @@ def make_parser():
     # blur parameters
     train_parser.add_argument('--transform_type', default='blur',
         choices=['blur', 'learnable_forward', 'identity'], 
-        help='constants scheduler for the diffusion model.')
+        help='Forward transform type.')
     train_parser.add_argument('--drop_forward_coef', type=bool, default=False,
         help='Dont scale image in the forward pass')
     train_parser.add_argument('--level_initializer', default='random',
@@ -101,7 +100,7 @@ def make_parser():
     eval_parser.add_argument('--folder', default='.',
         help='folder to evaluate.')
     eval_parser.add_argument('--sampler', default='naive',
-        choices=['naive', 'naive_clipped','momentum'], 
+        choices=['naive', 'naive_clipped', 'momentum'], 
         help='Sampler type during the inference phase.')
     eval_parser.add_argument('--model_selection', default='fid_score',
         choices=['fid_score', 'last', 'total_loss'], 
@@ -165,7 +164,6 @@ def train(args):
 
     trainer = Trainer(
         model,
-        weighted_time_sample=args.weighted_time_sample,
         lr=args.learning_rate,
         optimizer=args.optimizer,
         folder=args.folder,
@@ -175,6 +173,7 @@ def train(args):
         skip_epochs=skip_epochs,
         metrics=metrics,
         loss_type=args.loss_type,
+        loss=args.loss,
     )
     trainer.fit(data.get_dataset(args), args.epochs)
 
