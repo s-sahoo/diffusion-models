@@ -8,9 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.optim import Adam
-import torchvision
 from torchvision.utils import save_image
-from torchmetrics.image.inception import InceptionScore
 import PIL.Image as Image
 
 

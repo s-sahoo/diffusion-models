@@ -262,15 +262,25 @@ class Blurring(GaussianDiffusion):
         
         epsilon = yt_hat - xt
         sigma = get_by_idx(
-            self.sqrt_one_minus_bar_alphas, t, xt.shape)
+            self._get_noise_sigma(), t, xt.shape)
         sigma_prev = get_by_idx(
-            self.sqrt_one_minus_bar_alphas, t - 1, xt.shape)
+            self._get_noise_sigma(), t - 1, xt.shape)
         z = xt - ((sigma_prev / sigma) ** 2 - 1) * epsilon + torch.sqrt(
             sigma ** 2 - sigma_prev ** 2) * eta
         return z + yt_minus_1_hat - yt_hat
 
     def _naive_sampler(self, xt, t, t_index, deterministic=False):    
         x0_approx = xt + self.reverse_model(xt, t)
+        if t_index == 0:
+            return x0_approx
+        noise = None
+        if deterministic:
+            noise = torch.zeros_like(x0_approx)
+        return self.q_sample(x0_approx, t - 1, noise)
+
+    def _naive_sampler_clipped(self, xt, t, t_index, deterministic=False):    
+        x0_approx = xt + self.reverse_model(xt, t)
+        x0_approx = torch.clip(x0_approx, -1, 1)
         if t_index == 0:
             return x0_approx
         noise = None
@@ -287,6 +297,7 @@ class Blurring(GaussianDiffusion):
         samplers = {
             'momentum': self._momentum_sampler,
             'naive': self._naive_sampler,
+            'naive_clipped': self._naive_sampler_clipped,
         }
         return samplers[self.sampler](
             xt=xt,
