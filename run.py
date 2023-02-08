@@ -60,8 +60,14 @@ def make_parser():
         help='training batch size')
     train_parser.add_argument('--learning-rate', type=float, default=0.0005,
         help='learning rate')
+    train_parser.add_argument('--loss-epsilon', type=float, default=1e-6,
+        help='loss epsilon')
+    train_parser.add_argument('--loss-coefficients', default='ignore',
+        choices=['ignore', 'sample', 'scale'], help='optimization algorithm')        
     train_parser.add_argument('--optimizer', default='adam', choices=['adam'],
         help='optimization algorithm')
+    train_parser.add_argument('--loss', default='l2', choices=['l1', 'l2'],
+        help='loss type')
     train_parser.add_argument('--folder', default='.',
         help='folder where logs will be stored')
     # masking parameters
@@ -164,8 +170,11 @@ def train(args):
         optimizer=args.optimizer,
         folder=args.folder,
         from_checkpoint=checkpoint,
+        loss_coefficients=args.loss_coefficients,
+        loss_epsilon=args.loss_epsilon,
         skip_epochs=skip_epochs,
         metrics=metrics,
+        loss_type=args.loss_type,
     )
     trainer.fit(data.get_dataset(args), args.epochs)
 

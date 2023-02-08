@@ -18,7 +18,8 @@ class Trainer():
     def __init__(
         self, diffusion_model, lr=1e-3, optimizer='adam', 
         folder='.', n_samples=36, from_checkpoint=None,
-        loss_coefficients=False, skip_epochs=0, metrics=None):
+        loss_coefficients=False, skip_epochs=0, metrics=None,
+        loss_epsilon=1e-6, loss_type='l2'):
         self.model = diffusion_model
         if optimizer=='adam':
             optimizer = Adam(self.model.parameters(), lr=lr)
@@ -28,6 +29,8 @@ class Trainer():
         self.folder = folder
         self.n_samples = n_samples
         self.loss_coefficients = loss_coefficients
+        self.loss_epsilon = loss_epsilon
+        self.loss_type = loss_type
         print('Using weighted time samples:', self.loss_coefficients)
         if metrics is None:
             self.metrics = collections.defaultdict(list)
@@ -45,26 +48,29 @@ class Trainer():
                 batch_size = batch.shape[0]
                 batch = batch.to(self.model.device)
 
-                # Algorithm 1 line 3: sample t uniformally for every example in the batch
-                time_weights = 1 / (
-                    0.1  + self.model._get_noise_sigma().detach() ** 2)
-                loss_weights = time_weights.sum()
+                loss_coefficients = 1 / (
+                    self.loss_epsilon + self.model._get_noise_sigma().detach() ** 2)
                 if self.loss_coefficients == 'sample':
                     t = torch.multinomial(
-                        time_weights, batch_size,
+                        loss_coefficients, batch_size,
                         replacement=True).long().to(self.model.device)
-                else:
+                    loss_weights = loss_coefficients.sum()
+                elif self.loss_coefficients in {'ignore', 'scale'}:
                     t = torch.randint(
                         0, self.model.timesteps, (batch_size,),
                         device=self.model.device).long()
-                    loss_weights = 1.0
                     if self.loss_coefficients == 'scale':
-                        loss_scale = # TODO
+                        loss_scale = loss_coefficients
+                    else:
+                        loss_scale = torch.ones_like(
+                            loss_coefficients, device=self.model.device)
+                    loss_weights = 1.0
                 loss, metrics = self.model.loss_at_step_t(
                     x0=batch,
                     t=t,
                     loss_weights=loss_weights,
-                    loss_type='l1')
+                    loss_scale=loss_scale,
+                    loss_type=self.loss_type)
 
                 if step % 100 == 0:
                     print_line = f'{epoch}:{step}: Loss: {loss.item():.4f}'
@@ -73,6 +79,7 @@ class Trainer():
                         metrics_per_epoch[key].append(value)
                     print(print_line)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.)
                 self.optimizer.step()
             # save generated images
             self.save_images(epoch, step)

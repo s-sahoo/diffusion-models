@@ -139,14 +139,23 @@ class Blurring(GaussianDiffusion):
         elif self.schedule == 'new_cosine_1':
             gammas = self._cosine_schedule(
                 start=torch.tensor(0, device=self.device),
-                end=1,
-                tau=1)
+                end=torch.tensor(1, device=self.device),
+                tau=torch.tensor(1, device=self.device))
         elif self.schedule == 'new_cosine_2':
-            gammas = self._cosine_schedule(start=0.2, end=1, tau=1)
+            gammas = self._cosine_schedule(
+                start=torch.tensor(0.2, device=self.device),
+                end=torch.tensor(1, device=self.device),
+                tau=torch.tensor(1, device=self.device))
         elif self.schedule == 'new_cosine_3':
-            gammas = self._cosine_schedule(start=0.2, end=1, tau=2)
+            gammas = self._cosine_schedule(
+                start=torch.tensor(0.2, device=self.device),
+                end=torch.tensor(1, device=self.device),
+                tau=torch.tensor(2, device=self.device))
         elif self.schedule == 'new_cosine_4':
-            gammas = self._cosine_schedule(start=0.2, end=1, tau=3)
+            gammas = self._cosine_schedule(
+                start=torch.tensor(0.2, device=self.device),
+                end=torch.tensor(1, device=self.device),
+                tau=torch.tensor(3, device=self.device))
         return torch.clip(gammas, 1e-9, 1)
 
     def _get_noise_sigma(self):
@@ -311,7 +320,7 @@ class Blurring(GaussianDiffusion):
         return ((1 - mask) * blur_scale * transformation_matrices
                 + mask * self.identity)
 
-    def loss_at_step_t(self, x0, t, loss_weights, loss_type='l1', noise=None):
+    def loss_at_step_t(self, x0, t, loss_weights, loss_scale, loss_type, noise=None):
         if noise is None:
             noise = torch.randn_like(x0)
         else:
@@ -341,7 +350,9 @@ class Blurring(GaussianDiffusion):
             prediction = torch.bmm(
                 transformation_matrices,
                 self.reverse_model(x_t, t).view(batch_size, self.img_dim ** 2, 1))
-        reconstruction_loss = self.p_loss_at_step_t(target, prediction, 'l2')
+        loss_scale_t = get_by_idx(loss_scale, t, target.shape)
+        reconstruction_loss = self.p_loss_at_step_t(
+            target * loss_scale_t, prediction * loss_scale_t, loss_type)
         kl_divergence = self._compute_prior_kl_divergence(x0, batch_size)
         total_loss = reconstruction_loss + kl_divergence / (loss_weights * self.timesteps)
 
