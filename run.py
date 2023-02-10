@@ -198,7 +198,7 @@ def eval(cmd_args):
 
     scores = {'fid_score': [], 'is_score': []}
     fid_score = model.compute_fid_scores(
-        batch_size=args.batch_size,
+        batch_size=512,
         num_samples=10000)
     with open('{}/eval-{}-fid.txt'.format(args.folder, eval_name), 'w') as f:
         f.write(str(fid_score))
