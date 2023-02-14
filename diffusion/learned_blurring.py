@@ -277,6 +277,42 @@ class Blurring(GaussianDiffusion):
             noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
 
+
+    def _ddpm_sampler(self, xt, t, t_index, deterministic=False):
+        x0_approx = xt + self.reverse_model(xt, t)
+        if t_index == 0:
+            return x0_approx
+        bar_alphas = self.gammas
+        bar_alphas_prev = F.pad(bar_alphas[:-1], (1, 0), value=1.0)
+        alphas = bar_alphas / bar_alphas_prev
+        betas = 1 - alphas
+        betas_t = get_by_idx(betas, t, xt.shape)
+        sqrt_one_minus_bar_alphas_t = get_by_idx(
+            torch.sqrt(1 - bar_alphas), t, xt.shape)
+        sqrt_recip_alphas_t = get_by_idx(torch.sqrt(1.0 / alphas), t, xt.shape)
+        
+        # compute epsilon
+        predicted_noise = xt - self.q_sample(
+            x0_approx, t, torch.zeros_like(x0_approx))
+        
+        xt_prev_mean = sqrt_recip_alphas_t * (
+            xt - betas_t * predicted_noise / sqrt_one_minus_bar_alphas_t)
+
+        if deterministic:
+            xt_prev = xt_prev_mean # need this?
+        else:
+            post_var_t = get_by_idx(
+                betas * (1. - bar_alphas_prev) / (1. - bar_alphas),
+                t,
+                xt.shape)
+            noise = torch.randn_like(xt)
+            # Algorithm 2 line 4:
+            xt_prev = xt_prev_mean + torch.sqrt(post_var_t) * noise
+
+        # return x_{t-1}
+        return xt_prev
+
+
     def _naive_sampler_clipped(self, xt, t, t_index, deterministic=False):    
         x0_approx = xt + self.reverse_model(xt, t)
         x0_approx = torch.clip(x0_approx, -1, 1)
@@ -297,6 +333,7 @@ class Blurring(GaussianDiffusion):
             'momentum': self._momentum_sampler,
             'naive': self._naive_sampler,
             'naive_clipped': self._naive_sampler_clipped,
+            'ddpm': self._ddpm_sampler,
         }
         return samplers[self.sampler](
             xt=xt,

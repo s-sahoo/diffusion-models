@@ -100,7 +100,7 @@ def make_parser():
     eval_parser.add_argument('--folder', default='.',
         help='folder to evaluate.')
     eval_parser.add_argument('--sampler', default='naive',
-        choices=['naive', 'naive_clipped', 'momentum'], 
+        choices=['naive', 'naive_clipped', 'momentum', 'ddpm'], 
         help='Sampler type during the inference phase.')
     eval_parser.add_argument('--model_selection', default='fid_score',
         choices=['fid_score', 'last', 'total_loss'], 
