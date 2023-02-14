@@ -292,8 +292,8 @@ class Blurring(GaussianDiffusion):
         sqrt_recip_alphas_t = get_by_idx(torch.sqrt(1.0 / alphas), t, xt.shape)
         
         # compute epsilon
-        predicted_noise = xt - self.q_sample(
-            x0_approx, t, torch.zeros_like(x0_approx))
+        predicted_noise = (xt - self.q_sample(
+            x0_approx, t, torch.zeros_like(x0_approx))) / sqrt_one_minus_bar_alphas_t
         
         xt_prev_mean = sqrt_recip_alphas_t * (
             xt - betas_t * predicted_noise / sqrt_one_minus_bar_alphas_t)
