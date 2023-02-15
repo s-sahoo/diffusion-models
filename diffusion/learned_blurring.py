@@ -331,7 +331,7 @@ class Blurring(GaussianDiffusion):
         if deterministic:
             noise = torch.zeros_like(x0_approx)
         delta = xt - self.q_sample(x0_approx, t, noise)
-        return (delta + self.q_sample(x0_approx, t - 1, noise)) / 1.414
+        return delta + self.q_sample(x0_approx, t - 1, noise)
 
     @torch.no_grad()
     def p_sample(self, xt, t_index, deterministic=False):
