@@ -41,7 +41,7 @@ def make_parser():
                  'new_cosine_2', 'new_cosine_3', 'new_cosine_4'], 
         help='constants scheduler for the diffusion model.')
     train_parser.add_argument('--sampler', default='naive',
-        choices=['naive', 'naive_clipped', 'momentum'], 
+        choices=['naive', 'naive_clipped', 'momentum', 'naive_improved', 'ddpm'], 
         help='Sampler type during the inference phase.')
     train_parser.add_argument('--loss_type', default='elbo',
         choices=['elbo', 'soft_diffusion'], 
@@ -100,7 +100,7 @@ def make_parser():
     eval_parser.add_argument('--folder', default='.',
         help='folder to evaluate.')
     eval_parser.add_argument('--sampler', default='naive',
-        choices=['naive', 'naive_clipped', 'momentum', 'ddpm'], 
+        choices=['naive', 'naive_clipped', 'momentum', 'ddpm', 'naive_improved'], 
         help='Sampler type during the inference phase.')
     eval_parser.add_argument('--model_selection', default='fid_score',
         choices=['fid_score', 'last', 'total_loss'], 

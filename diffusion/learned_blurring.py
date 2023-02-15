@@ -323,6 +323,16 @@ class Blurring(GaussianDiffusion):
             noise = torch.zeros_like(x0_approx)
         return self.q_sample(x0_approx, t - 1, noise)
 
+    def _naive_sampler_improved(self, xt, t, t_index, deterministic=False):    
+        x0_approx = xt + self.reverse_model(xt, t)
+        if t_index == 0:
+            return x0_approx
+        noise = None
+        if deterministic:
+            noise = torch.zeros_like(x0_approx)
+        delta = xt - self.q_sample(x0_approx, t, noise)
+        return (delta + self.q_sample(x0_approx, t - 1, noise)) / 1.414
+
     @torch.no_grad()
     def p_sample(self, xt, t_index, deterministic=False):
         """Samples from the reverse diffusion process p at time step t.
@@ -333,6 +343,7 @@ class Blurring(GaussianDiffusion):
             'momentum': self._momentum_sampler,
             'naive': self._naive_sampler,
             'naive_clipped': self._naive_sampler_clipped,
+            'naive_improved': self._naive_sampler_improved,
             'ddpm': self._ddpm_sampler,
         }
         return samplers[self.sampler](
